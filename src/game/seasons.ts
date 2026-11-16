@@ -42,3 +42,9 @@ export function dayKey(date: Date): string {
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
+
+/** La nuit (et les visiteurs nocturnes) : de 20 h à 7 h. */
+export function isNight(date: Date): boolean {
+  const h = date.getHours();
+  return h >= 20 || h < 7;
+}

@@ -1,18 +1,24 @@
-// La scène du jardin : décor, potager, interactions au toucher/clic, petits effets.
+// La scène du jardin : décor, potager, jardin vivant (trouvailles, visiteurs, déco, courrier),
+// interactions au toucher/clic et petits effets.
 
 import Phaser from 'phaser';
 import { BACKDROP, rng } from '../art/draw';
+import { LEAF_BITS } from '../art/living-sprites';
 import { GRASS_VARIANTS, PATH_VARIANTS, TREE_VARIANTS, WILD_VARIANTS, registerTextures } from '../art/textures';
 import { PLOT_COLS, PLOT_ORIGIN, PLOT_ROWS, TILE, WORLD_COLS, WORLD_ROWS } from '../game/config';
+import { DECOS } from '../game/decor';
 import { growthStage, isRipe, isWet, timeUntilRipe } from '../game/growth';
 import type { Season } from '../game/seasons';
-import type { Game } from '../game/state';
-import { cropName, formatDuration, t } from '../i18n';
+import type { ForageItem, Game, GiftResult, PlacedDeco, VisitorInstance } from '../game/state';
+import { GARDEN_MAX_ROW, GARDEN_MIN_ROW, MAILBOX_TILE, TREE_POS, tileFoot } from '../game/world';
+import { cropName, formatDuration, giftLabel, t, visitorName } from '../i18n';
+import { edit } from '../ui/edit';
 
 export interface SceneHooks {
   toast(message: string): void;
   confirmTill(cost: number, onConfirm: () => void): void;
   openShop(tab: 'buy' | 'sell'): void;
+  openLetter(): void;
 }
 
 const WORLD_W = WORLD_COLS * TILE;
@@ -23,9 +29,12 @@ const MARGIN_ROWS = 10;
 
 const DEPTH_GROUND = 0;
 const DEPTH_SOIL = 1;
+const DEPTH_EDIT_GRID = 2;
 const DEPTH_OBJECTS = 10; // + y du pied de l'objet
+const DEPTH_PERCHED = DEPTH_OBJECTS + 2000;
 const DEPTH_FX = 5000;
 const DEPTH_NIGHT = 6000;
+const DEPTH_LIGHT = 6001;
 
 interface PlotView {
   soil: Phaser.GameObjects.Image;
@@ -33,6 +42,12 @@ interface PlotView {
   plant: Phaser.GameObjects.Image;
   sparkle: Phaser.GameObjects.Image;
   lastKey: string;
+}
+
+interface ThingView {
+  img: Phaser.GameObjects.Image;
+  extras: Phaser.GameObjects.GameObject[];
+  glow?: Phaser.GameObjects.Image;
 }
 
 interface SeasonalImage {
@@ -43,11 +58,21 @@ interface SeasonalImage {
 export class GardenScene extends Phaser.Scene {
   private views: PlotView[] = [];
   private seasonal: SeasonalImage[] = [];
+  private forageViews = new Map<number, ThingView>();
+  private decoViews = new Map<number, ThingView>();
+  private visitorViews = new Map<number, ThingView>();
   private cabinImg!: Phaser.GameObjects.Image;
+  private mainTree!: Phaser.GameObjects.Image;
+  private mailbox!: Phaser.GameObjects.Image;
+  private letterBubble!: Phaser.GameObjects.Image;
   private cursorImg!: Phaser.GameObjects.Image;
+  private ghost!: Phaser.GameObjects.Image;
+  private editGrid!: Phaser.GameObjects.Graphics;
   private nightOverlay!: Phaser.GameObjects.Rectangle;
   private season!: Season;
   private night = false;
+  /** 0 le jour, 0,5 à l'aube et au crépuscule, 1 la nuit : intensité des lumières. */
+  private lightLevel = 0;
   private wateredHintShown = false;
 
   constructor(private garden: Game, private hooks: SceneHooks) {
@@ -62,7 +87,9 @@ export class GardenScene extends Phaser.Scene {
     this.buildDecor();
     this.buildPlot();
 
+    this.editGrid = this.add.graphics().setDepth(DEPTH_EDIT_GRID);
     this.cursorImg = this.add.image(0, 0, 'fx_cursor').setOrigin(0, 0).setDepth(DEPTH_FX).setVisible(false);
+    this.ghost = this.add.image(0, 0, 'deco_stepstone').setOrigin(0.5, 1).setAlpha(0.7).setDepth(DEPTH_FX).setVisible(false);
     this.nightOverlay = this.add
       .rectangle(-MARGIN_COLS * TILE, -MARGIN_ROWS * TILE, WORLD_W + 2 * MARGIN_COLS * TILE, WORLD_H + 2 * MARGIN_ROWS * TILE, 0x1a1a4a, 0)
       .setOrigin(0, 0)
@@ -74,11 +101,12 @@ export class GardenScene extends Phaser.Scene {
     this.refresh();
 
     this.scale.on('resize', () => this.layout());
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onPointerDown(p));
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => this.onPointerDown(p, over));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onPointerMove(p));
-    this.input.on('gameout', () => this.cursorImg.setVisible(false));
+    this.input.on('gameout', () => { this.cursorImg.setVisible(false); this.ghost.setVisible(false); });
 
     this.garden.onChange(() => this.refresh());
+    edit.on(() => this.onEditChanged());
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.refresh() });
     this.time.addEvent({ delay: 30_000, loop: true, callback: () => this.updateTimeOfDay() });
   }
@@ -105,10 +133,21 @@ export class GardenScene extends Phaser.Scene {
     this.cabinImg = this.add.image(TILE, 4 * TILE, `cabin_${this.season}_day`).setOrigin(0, 1);
     this.cabinImg.setDepth(DEPTH_OBJECTS + 4 * TILE);
 
-    // Arbres et buissons du jardin.
-    this.addTree(10 * TILE, 4 * TILE - 2, 0);
-    this.addBush(0, 5 * TILE);
-    this.addBush(11 * TILE, 5 * TILE);
+    // Boîte aux lettres à côté de la porte, avec une bulle quand une lettre attend.
+    const mb = tileFoot(MAILBOX_TILE.col, MAILBOX_TILE.row);
+    this.mailbox = this.add.image(mb.x, mb.y, 'mailbox_down').setOrigin(0.5, 1).setDepth(DEPTH_OBJECTS + mb.y);
+    this.mailbox.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+      if (edit.active) return;
+      this.wiggle(this.mailbox);
+      this.hooks.openLetter();
+    });
+    this.letterBubble = this.add.image(mb.x, mb.y - 30, 'ui_letter').setDepth(DEPTH_FX - 2).setVisible(false);
+    this.tweens.add({ targets: this.letterBubble, y: mb.y - 33, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+
+    // L'arbre du jardin : on peut le secouer.
+    this.mainTree = this.addTree(TREE_POS.x, TREE_POS.footY, 0);
+    this.mainTree.setInteractive({ useHandCursor: true }).on('pointerdown', () => { if (!edit.active) this.shakeTree(); });
+
     this.addBush(0, 11 * TILE);
     this.addBush(11 * TILE, 11 * TILE);
 
@@ -137,10 +176,11 @@ export class GardenScene extends Phaser.Scene {
     }
   }
 
-  private addTree(x: number, footY: number, variant: number): void {
+  private addTree(x: number, footY: number, variant: number): Phaser.GameObjects.Image {
     const img = this.add.image(x, footY, `tree_${this.season}_${variant}`).setOrigin(0.5, 1);
     img.setDepth(DEPTH_OBJECTS + footY);
     this.seasonal.push({ img, key: (s) => `tree_${s}_${variant}` });
+    return img;
   }
 
   private addBush(x: number, y: number): void {
@@ -182,8 +222,8 @@ export class GardenScene extends Phaser.Scene {
 
   refresh(): void {
     const now = this.garden.now();
-    const plots = this.garden.state.plots;
-    plots.forEach((tile, i) => {
+    const s = this.garden.state;
+    s.plots.forEach((tile, i) => {
       const v = this.views[i];
       v.soil.setVisible(tile.tilled);
       v.wild.setVisible(!tile.tilled);
@@ -203,8 +243,28 @@ export class GardenScene extends Phaser.Scene {
         v.lastKey = '';
       }
     });
+
+    this.sync(this.forageViews, s.forage, (f) => this.makeForage(f));
+    this.sync(this.decoViews, s.decor.placed, (d) => this.makeDeco(d));
+    this.sync(this.visitorViews, s.visitors, (v) => this.makeVisitor(v));
+
+    this.mailbox.setTexture(s.letter ? 'mailbox_up' : 'mailbox_down');
+    this.letterBubble.setVisible(!!s.letter && !edit.active);
+    if (edit.active) this.drawEditGrid();
+
     const season = this.garden.season;
     if (season !== this.season) this.applySeason(season);
+  }
+
+  /** Aligne les sprites sur l'état : crée ce qui est nouveau, efface en douceur ce qui est parti. */
+  private sync<T extends { uid: number }>(views: Map<number, ThingView>, items: T[], make: (item: T) => ThingView): void {
+    const alive = new Set(items.map((i) => i.uid));
+    for (const [uid, view] of views) {
+      if (alive.has(uid)) continue;
+      views.delete(uid);
+      this.fadeOut(view);
+    }
+    for (const item of items) if (!views.has(item.uid)) views.set(item.uid, make(item));
   }
 
   private applySeason(season: Season): void {
@@ -214,44 +274,209 @@ export class GardenScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor(BACKDROP[season]);
   }
 
-  /** Teinte selon l'heure réelle : aube et soir dorés, nuit bleutée avec fenêtres allumées. */
+  /** Teinte selon l'heure réelle : aube et soir dorés, nuit bleutée avec fenêtres et lanternes allumées. */
   private updateTimeOfDay(): void {
-    const h = new Date(this.garden.now()).getHours() + new Date(this.garden.now()).getMinutes() / 60;
+    const d = new Date(this.garden.now());
+    const h = d.getHours() + d.getMinutes() / 60;
     let color = 0x1a1a4a, alpha = 0;
-    if (h >= 21.5 || h < 5.5) { color = 0x1a1a4a; alpha = 0.38; }
-    else if (h >= 19 || h < 7) { color = 0xff8a4a; alpha = 0.14; }
+    this.lightLevel = 0;
+    if (h >= 21.5 || h < 5.5) { color = 0x1a1a4a; alpha = 0.38; this.lightLevel = 1; }
+    else if (h >= 19 || h < 7) { color = 0xff8a4a; alpha = 0.14; this.lightLevel = 0.5; }
     this.nightOverlay.setFillStyle(color, alpha);
     this.night = h >= 19 || h < 7;
     this.cabinImg.setTexture(`cabin_${this.season}_${this.night ? 'night' : 'day'}`);
+    for (const v of this.decoViews.values()) v.glow?.setAlpha(this.lightLevel * 0.9);
+  }
+
+  // --- Trouvailles, déco, visiteurs -------------------------------------------
+
+  private makeForage(f: ForageItem): ThingView {
+    const foot = tileFoot(f.col, f.row);
+    const shadow = this.add.image(foot.x, foot.y - 3, 'fx_shadow').setDepth(DEPTH_SOIL + 0.5);
+    const img = this.add.image(foot.x, foot.y - 2, `mat_${f.id}`).setOrigin(0.5, 1).setDepth(DEPTH_OBJECTS + foot.y);
+    img.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.collect(f.uid));
+    this.appear(img);
+    this.tweens.add({ targets: img, y: foot.y - 3, duration: 900 + (f.uid % 5) * 120, yoyo: true, repeat: -1, ease: 'Stepped' });
+    return { img, extras: [shadow] };
+  }
+
+  private makeDeco(d: PlacedDeco): ThingView {
+    const foot = tileFoot(d.col, d.row);
+    const img = this.add.image(foot.x, foot.y, `deco_${d.id}`).setOrigin(0.5, 1).setDepth(DEPTH_OBJECTS + foot.y - 0.5);
+    img.setInteractive({ useHandCursor: true }).on('pointerdown', () => { if (!edit.active) this.wiggle(img); });
+    let glow: Phaser.GameObjects.Image | undefined;
+    if (DECOS[d.id].glow) {
+      const gy = d.id === 'lantern' ? foot.y - 17 : foot.y - 6;
+      glow = this.add.image(foot.x, gy, 'fx_glow').setBlendMode(Phaser.BlendModes.ADD).setDepth(DEPTH_LIGHT).setAlpha(this.lightLevel * 0.9);
+      this.tweens.add({ targets: glow, scale: { from: 0.95, to: 1.08 }, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    }
+    this.pop(img);
+    return { img, extras: glow ? [glow] : [], glow };
+  }
+
+  private makeVisitor(v: VisitorInstance): ThingView {
+    const img = this.add.image(v.x, v.y, `vis_${v.id}`).setOrigin(0.5, 1);
+    img.setDepth(v.perch ? DEPTH_PERCHED : DEPTH_OBJECTS + v.y + 0.25);
+    if (v.uid % 2 === 0) img.setFlipX(true);
+    img.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.greet(v.uid));
+    const extras: Phaser.GameObjects.GameObject[] = [];
+    if (v.id === 'firefly') {
+      const glow = this.add.image(v.x, v.y - 6, 'fx_glow').setBlendMode(Phaser.BlendModes.ADD).setDepth(DEPTH_LIGHT).setScale(0.6);
+      this.tweens.add({ targets: [img, glow], y: '-=4', duration: 1600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      this.tweens.add({ targets: glow, alpha: { from: 0.4, to: 1 }, duration: 900, yoyo: true, repeat: -1 });
+      extras.push(glow);
+    } else if (v.id === 'butterfly') {
+      this.tweens.add({ targets: img, scaleX: { from: 1, to: 0.4 }, duration: 220, yoyo: true, repeat: -1, repeatDelay: 300 });
+    } else if (!v.perch || v.id === 'bluetit') {
+      // Petits sauts de temps en temps.
+      this.tweens.add({ targets: img, y: v.y - 2, duration: 120, yoyo: true, repeat: -1, repeatDelay: 1800 + (v.uid % 7) * 400 });
+    }
+    img.setAlpha(0);
+    this.tweens.add({ targets: img, alpha: 1, duration: 500 });
+    return { img, extras };
+  }
+
+  private collect(uid: number): void {
+    if (edit.active) return;
+    const view = this.forageViews.get(uid);
+    const res = this.garden.collect(uid);
+    if (!res.ok || !view) return;
+    this.forageViews.delete(uid);
+    this.flyIcon(view.img.x, view.img.y - 8, `mat_${res.material}`);
+    this.destroyView(view);
+  }
+
+  private greet(uid: number): void {
+    if (edit.active) return;
+    const view = this.visitorViews.get(uid);
+    const res = this.garden.greet(uid);
+    if (!res.ok || !view) return;
+    this.visitorViews.delete(uid);
+    const { x, y } = view.img;
+    this.heart(x, y - 16);
+    if (res.gift) this.flyGift(x, y - 10, res.gift);
+    // Le visiteur repart en sautillant.
+    this.tweens.killTweensOf(view.img);
+    this.tweens.add({ targets: view.img, y: y - 10, alpha: 0, duration: 450, delay: 150, ease: 'Quad.easeIn', onComplete: () => this.destroyView(view) });
+    for (const e of view.extras) this.tweens.add({ targets: e, alpha: 0, duration: 400 });
+
+    const gift = res.gift ? giftLabel(res.gift) : '';
+    if (res.first) this.hooks.toast(`${t('toast.newVisitor', { name: visitorName(res.visitor) })}${gift ? ` ${gift}` : ''}`);
+    else if (gift) this.hooks.toast(`${visitorName(res.visitor)} : ${gift}`);
+  }
+
+  private shakeTree(): void {
+    const tree = this.mainTree;
+    this.tweens.killTweensOf(tree);
+    tree.setAngle(0);
+    this.tweens.add({ targets: tree, angle: { from: -2, to: 2 }, duration: 70, yoyo: true, repeat: 2, onComplete: () => tree.setAngle(0) });
+    this.fallingLeaves(tree.x, tree.y - 30);
+    const res = this.garden.shakeTree();
+    if (res.dropped) {
+      const view = this.forageViews.get(res.dropped.uid);
+      if (view) {
+        const targetY = view.img.y;
+        view.img.y = tree.y - 26;
+        this.tweens.killTweensOf(view.img);
+        this.tweens.add({ targets: view.img, y: targetY, duration: 500, ease: 'Bounce.easeOut' });
+      }
+    }
+  }
+
+  // --- Mode déco ---------------------------------------------------------------
+
+  private onEditChanged(): void {
+    if (edit.active) {
+      this.drawEditGrid();
+      if (edit.hand) this.ghost.setTexture(`deco_${edit.hand}`);
+    } else {
+      this.editGrid.clear();
+      this.ghost.setVisible(false);
+    }
+    this.letterBubble.setVisible(!!this.garden.state.letter && !edit.active);
+  }
+
+  private drawEditGrid(): void {
+    const g = this.editGrid;
+    g.clear();
+    for (let row = GARDEN_MIN_ROW; row <= GARDEN_MAX_ROW; row++) {
+      for (let col = 0; col < WORLD_COLS; col++) {
+        const deco = this.garden.decoAt(col, row);
+        if (deco) {
+          g.lineStyle(1, 0xffd75a, 0.9).strokeRect(col * TILE + 0.5, row * TILE + 0.5, TILE - 1, TILE - 1);
+        } else if (this.garden.canPlace(col, row)) {
+          g.fillStyle(0xffffff, 0.16).fillRect(col * TILE + 1, row * TILE + 1, TILE - 2, TILE - 2);
+        }
+      }
+    }
+  }
+
+  private onEditTap(col: number, row: number): void {
+    const g = this.garden;
+    if (edit.hand) {
+      if (g.canPlace(col, row)) {
+        g.placeDeco(edit.hand, col, row);
+        edit.setHand(null);
+        this.ghost.setVisible(false);
+      } else if (g.decoAt(col, row)) {
+        this.hooks.toast(t('edit.occupied'));
+      } else {
+        this.hooks.toast(t('edit.cantPlace'));
+      }
+      return;
+    }
+    const picked = g.pickUpDeco(col, row);
+    if (picked) edit.setHand(picked);
   }
 
   // --- Interactions ---------------------------------------------------------
 
-  private plotIndexAt(p: Phaser.Input.Pointer): number {
+  private tileAt(p: Phaser.Input.Pointer): { col: number; row: number } {
     const wp = this.cameras.main.getWorldPoint(p.x, p.y);
-    const col = Math.floor(wp.x / TILE) - PLOT_ORIGIN.col;
-    const row = Math.floor(wp.y / TILE) - PLOT_ORIGIN.row;
+    return { col: Math.floor(wp.x / TILE), row: Math.floor(wp.y / TILE) };
+  }
+
+  private plotIndexAt(p: Phaser.Input.Pointer): number {
+    const { col: c, row: r } = this.tileAt(p);
+    const col = c - PLOT_ORIGIN.col, row = r - PLOT_ORIGIN.row;
     if (col < 0 || row < 0 || col >= PLOT_COLS || row >= PLOT_ROWS) return -1;
     return row * PLOT_COLS + col;
   }
 
-  private showCursor(index: number): void {
-    if (index < 0) { this.cursorImg.setVisible(false); return; }
-    const col = index % PLOT_COLS, row = Math.floor(index / PLOT_COLS);
-    this.cursorImg.setPosition((PLOT_ORIGIN.col + col) * TILE - 1, (PLOT_ORIGIN.row + row) * TILE - 1).setVisible(true);
+  private showCursorAt(col: number, row: number): void {
+    this.cursorImg.setPosition(col * TILE - 1, row * TILE - 1).setVisible(true);
   }
 
   private onPointerMove(p: Phaser.Input.Pointer): void {
     if (p.wasTouch) return;
+    if (edit.active) {
+      const { col, row } = this.tileAt(p);
+      const inGarden = col >= 0 && col < WORLD_COLS && row >= GARDEN_MIN_ROW && row <= GARDEN_MAX_ROW;
+      if (inGarden) this.showCursorAt(col, row);
+      else this.cursorImg.setVisible(false);
+      if (edit.hand && inGarden) {
+        const foot = tileFoot(col, row);
+        this.ghost.setPosition(foot.x, foot.y).setVisible(true);
+        this.ghost.setTint(this.garden.canPlace(col, row) ? 0xffffff : 0xff7a7a);
+      } else this.ghost.setVisible(false);
+      return;
+    }
     const i = this.plotIndexAt(p);
-    this.showCursor(i);
+    if (i >= 0) this.showCursorAt(PLOT_ORIGIN.col + (i % PLOT_COLS), PLOT_ORIGIN.row + Math.floor(i / PLOT_COLS));
+    else this.cursorImg.setVisible(false);
     this.input.setDefaultCursor(i >= 0 ? 'pointer' : 'default');
   }
 
-  private onPointerDown(p: Phaser.Input.Pointer): void {
+  private onPointerDown(p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]): void {
+    if (edit.active) {
+      const { col, row } = this.tileAt(p);
+      this.onEditTap(col, row);
+      return;
+    }
+    if (over.length) return; // une trouvaille, un visiteur, la boîte aux lettres… a déjà réagi
     const i = this.plotIndexAt(p);
     if (i < 0) return;
-    this.showCursor(i);
+    this.showCursorAt(PLOT_ORIGIN.col + (i % PLOT_COLS), PLOT_ORIGIN.row + Math.floor(i / PLOT_COLS));
     if (p.wasTouch) this.time.delayedCall(250, () => this.cursorImg.setVisible(false));
     this.actOn(i);
   }
@@ -313,10 +538,27 @@ export class GardenScene extends Phaser.Scene {
     this.tweens.add({ targets: img, scaleY: 1, scaleX: 1, duration: 260, ease: 'Back.easeOut' });
   }
 
+  private appear(img: Phaser.GameObjects.Image): void {
+    img.setScale(0);
+    this.tweens.add({ targets: img, scale: 1, duration: 300, ease: 'Back.easeOut' });
+  }
+
   private wiggle(img: Phaser.GameObjects.Image): void {
     this.tweens.killTweensOf(img);
     img.setAngle(0);
     this.tweens.add({ targets: img, angle: { from: -6, to: 6 }, duration: 90, yoyo: true, repeat: 1, onComplete: () => img.setAngle(0) });
+  }
+
+  private fadeOut(view: ThingView): void {
+    const targets = [view.img, ...view.extras];
+    this.tweens.killTweensOf(targets);
+    this.tweens.add({ targets, alpha: 0, duration: 350, onComplete: () => this.destroyView(view) });
+  }
+
+  private destroyView(view: ThingView): void {
+    this.tweens.killTweensOf([view.img, ...view.extras]);
+    view.img.destroy();
+    for (const e of view.extras) e.destroy();
   }
 
   private splash(soil: Phaser.GameObjects.Image): void {
@@ -338,6 +580,30 @@ export class GardenScene extends Phaser.Scene {
         ease: 'Quad.easeOut', onComplete: () => d.destroy(),
       });
     }
+  }
+
+  private fallingLeaves(x: number, y: number): void {
+    const color = Phaser.Display.Color.HexStringToColor(LEAF_BITS[this.season]).color;
+    for (let k = 0; k < 7; k++) {
+      const leaf = this.add.rectangle(x - 12 + Math.random() * 24, y - Math.random() * 10, 2, 1, color).setDepth(DEPTH_FX);
+      this.tweens.add({
+        targets: leaf, y: leaf.y + 24 + Math.random() * 10, x: leaf.x + (Math.random() * 12 - 6), alpha: 0,
+        duration: 900 + Math.random() * 500, delay: k * 60, ease: 'Sine.easeIn', onComplete: () => leaf.destroy(),
+      });
+    }
+  }
+
+  private heart(x: number, y: number): void {
+    const h = this.add.image(x, y, 'fx_heart').setDepth(DEPTH_FX);
+    this.tweens.add({ targets: h, y: y - 12, alpha: { from: 1, to: 0 }, duration: 900, ease: 'Cubic.easeOut', onComplete: () => h.destroy() });
+  }
+
+  private flyGift(x: number, y: number, gift: GiftResult): void {
+    const keys: string[] = [];
+    if (gift.coins) keys.push('ui_coin');
+    if (gift.material) keys.push(`mat_${gift.material[0]}`);
+    if (gift.seeds) keys.push(`icon_${gift.seeds[0]}`);
+    keys.forEach((k, i) => this.time.delayedCall(i * 150, () => this.flyIcon(x + (i - (keys.length - 1) / 2) * 10, y, k)));
   }
 
   private flyIcon(x: number, y: number, key: string): void {

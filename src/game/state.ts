@@ -1,22 +1,58 @@
 // État du jeu, actions du joueur et sauvegarde automatique (localStorage).
 
 import {
-  PLOT_COLS, PLOT_ROWS, STARTING_COINS, STARTING_SEEDS, STARTING_TILLED,
+  FORAGE_AT_START, FORAGE_INTERVAL, FORAGE_MAX, LETTER_DELAY, LETTER_SKIP_DELAY,
+  PLOT_COLS, PLOT_ROWS, STARTING_COINS, STARTING_SEEDS, STARTING_TILLED, TREE_SHAKE_COOLDOWN,
+  VISITOR_GIFT_CHANCE, VISITOR_INTERVAL, VISITOR_MAX, VISITOR_STAY,
   WELCOME_BACK_AFTER, WET_DURATION, tillCost,
 } from './config';
 import { CROPS, CROP_IDS, cropsForSeason, isCropId, type CropId } from './crops';
+import { DECOS, isDecoId, type DecoId, type Recipe } from './decor';
 import { advancePlant, isRipe, type PlantState, type PlotTile } from './growth';
-import { SEASONS, dayKey, getSeason, type Season } from './seasons';
+import { CHARACTERS, makeLetter, type Letter, type Want } from './letters';
+import { forageTable, isMaterialId, type MaterialId } from './materials';
+import { SEASONS, dayKey, getSeason, isNight, type Season } from './seasons';
+import { VISITORS, VISITOR_IDS, isVisitorId, visitorAwake, type VisitorDef, type VisitorId } from './visitors';
+import { TREE_DROP_TILES, TREE_SPOTS, gardenTiles, isStaticBlocked, tileFoot } from './world';
 
 export type Lang = 'fr' | 'en';
 
-export interface CropJournalEntry {
+export interface JournalEntry {
   count: number;
   firstAt: number;
 }
 
+export interface ForageItem {
+  uid: number;
+  id: MaterialId;
+  col: number;
+  row: number;
+}
+
+export interface PlacedDeco {
+  uid: number;
+  id: DecoId;
+  col: number;
+  row: number;
+}
+
+export interface VisitorInstance {
+  uid: number;
+  id: VisitorId;
+  /** Pied du sprite, en pixels du monde. */
+  x: number;
+  y: number;
+  /** Case occupée (pour ne pas empiler les visiteurs). */
+  col: number;
+  row: number;
+  /** Perché (sur un nichoir, dans l'arbre) : dessiné au-dessus du reste. */
+  perch: boolean;
+  arrivedAt: number;
+  leavesAt: number;
+}
+
 export interface GameState {
-  version: 1;
+  version: 2;
   createdAt: number;
   updatedAt: number;
   coins: number;
@@ -25,12 +61,26 @@ export interface GameState {
   basket: Partial<Record<CropId, number>>;
   selectedSeed: CropId | null;
   lastSeason: Season;
+  materials: Partial<Record<MaterialId, number>>;
+  forage: ForageItem[];
+  nextForageAt: number;
+  decor: { placed: PlacedDeco[]; inventory: Partial<Record<DecoId, number>> };
+  visitors: VisitorInstance[];
+  nextVisitorAt: number;
+  letter: Letter | null;
+  nextLetterAt: number;
+  lettersDone: number;
+  treeShakeAt: number;
+  nextUid: number;
   journal: {
-    crops: Partial<Record<CropId, CropJournalEntry>>;
+    crops: Partial<Record<CropId, JournalEntry>>;
+    visitors: Partial<Record<VisitorId, JournalEntry>>;
     totalHarvests: number;
     coinsEarned: number;
     daysPlayed: number;
     lastDay: string;
+    forageCount: number;
+    lettersDelivered: number;
   };
   settings: {
     lang: Lang | null;
@@ -40,13 +90,20 @@ export interface GameState {
 export type FailReason =
   | 'notTilled' | 'occupied' | 'empty' | 'noSeedSelected' | 'noSeeds'
   | 'notRipe' | 'alreadyRipe' | 'alreadyWet' | 'alreadyTilled' | 'notEnoughCoins'
-  | 'outOfSeason' | 'nothingToSell';
+  | 'outOfSeason' | 'nothingToSell' | 'notFound' | 'missingItems' | 'noLetter' | 'blocked';
 
 export type ActionResult<T = object> = ({ ok: true } & T) | { ok: false; reason: FailReason };
+
+export interface GiftResult {
+  coins?: number;
+  material?: [MaterialId, number];
+  seeds?: [CropId, number];
+}
 
 export type GameEvent =
   | { type: 'seasonChanged'; from: Season; to: Season }
   | { type: 'ripened'; index: number; crop: CropId }
+  | { type: 'letterArrived' }
   | { type: 'newDay' };
 
 export interface LoadReport {
@@ -74,7 +131,7 @@ export function createNewGame(now: number): GameState {
   const starter = cropsForSeason(season).sort((a, b) => a.growTime - b.growTime)[0];
 
   return {
-    version: 1,
+    version: 2,
     createdAt: now,
     updatedAt: now,
     coins: STARTING_COINS,
@@ -83,26 +140,57 @@ export function createNewGame(now: number): GameState {
     basket: {},
     selectedSeed: starter.id,
     lastSeason: season,
-    journal: { crops: {}, totalHarvests: 0, coinsEarned: 0, daysPlayed: 1, lastDay: dayKey(new Date(now)) },
+    materials: {},
+    forage: [],
+    // Dans le passé : quelques trouvailles attendent déjà dans l'herbe au premier lancement.
+    nextForageAt: now - FORAGE_AT_START * FORAGE_INTERVAL[1],
+    decor: { placed: [], inventory: {} },
+    visitors: [],
+    nextVisitorAt: now,
+    letter: null,
+    nextLetterAt: now,
+    lettersDone: 0,
+    treeShakeAt: 0,
+    nextUid: 1,
+    journal: {
+      crops: {}, visitors: {}, totalHarvests: 0, coinsEarned: 0, daysPlayed: 1,
+      lastDay: dayKey(new Date(now)), forageCount: 0, lettersDelivered: 0,
+    },
     settings: { lang: null },
   };
 }
 
 // ---------------------------------------------------------------------------
-// Lecture prudente d'une sauvegarde : tout ce qui est invalide est remplacé par une valeur sûre.
+// Lecture prudente d'une sauvegarde (v1 ou v2) : tout ce qui est invalide est remplacé par une valeur sûre.
 
 function num(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 }
 
-function cropCounts(v: unknown): Partial<Record<CropId, number>> {
-  const out: Partial<Record<CropId, number>> = {};
+function counts<K extends string>(v: unknown, isKey: (k: unknown) => k is K): Partial<Record<K, number>> {
+  const out: Partial<Record<K, number>> = {};
   if (v && typeof v === 'object') {
     for (const [k, n] of Object.entries(v)) {
-      if (isCropId(k) && typeof n === 'number' && n > 0) out[k] = Math.floor(n);
+      if (isKey(k) && typeof n === 'number' && n > 0) out[k] = Math.floor(n);
     }
   }
   return out;
+}
+
+function journalEntries<K extends string>(v: unknown, isKey: (k: unknown) => k is K, now: number): Partial<Record<K, JournalEntry>> {
+  const out: Partial<Record<K, JournalEntry>> = {};
+  if (v && typeof v === 'object') {
+    for (const [k, e] of Object.entries<any>(v)) {
+      if (isKey(k) && e && typeof e.count === 'number') {
+        out[k] = { count: Math.max(0, Math.floor(e.count)), firstAt: num(e.firstAt, now) };
+      }
+    }
+  }
+  return out;
+}
+
+function arr(v: unknown): any[] {
+  return Array.isArray(v) ? v : [];
 }
 
 export function parseSave(raw: string, now: number): GameState | null {
@@ -112,7 +200,7 @@ export function parseSave(raw: string, now: number): GameState | null {
   } catch {
     return null;
   }
-  if (!data || data.version !== 1 || !Array.isArray(data.plots)) return null;
+  if (!data || (data.version !== 1 && data.version !== 2) || !Array.isArray(data.plots)) return null;
 
   const base = createNewGame(now);
   const plots: PlotTile[] = base.plots.map((fallback, i) => {
@@ -131,31 +219,84 @@ export function parseSave(raw: string, now: number): GameState | null {
   });
 
   const j = data.journal ?? {};
-  const journalCrops: GameState['journal']['crops'] = {};
-  if (j.crops && typeof j.crops === 'object') {
-    for (const [k, e] of Object.entries<any>(j.crops)) {
-      if (isCropId(k) && e && typeof e.count === 'number') {
-        journalCrops[k] = { count: Math.max(0, Math.floor(e.count)), firstAt: num(e.firstAt, now) };
-      }
+  let uid = Math.max(1, Math.floor(num(data.nextUid, 1)));
+  const taken = new Set<string>();
+  const freeTile = (col: unknown, row: unknown) =>
+    typeof col === 'number' && typeof row === 'number' && !isStaticBlocked(col, row) && !taken.has(`${col},${row}`);
+
+  const placed: PlacedDeco[] = [];
+  for (const d of arr(data.decor?.placed)) {
+    if (isDecoId(d?.id) && freeTile(d.col, d.row)) {
+      placed.push({ uid: uid++, id: d.id, col: d.col, row: d.row });
+      taken.add(`${d.col},${d.row}`);
+    }
+  }
+  const forage: ForageItem[] = [];
+  for (const f of arr(data.forage)) {
+    if (isMaterialId(f?.id) && freeTile(f.col, f.row)) {
+      forage.push({ uid: uid++, id: f.id, col: f.col, row: f.row });
+      taken.add(`${f.col},${f.row}`);
+    }
+  }
+  const visitors: VisitorInstance[] = [];
+  for (const v of arr(data.visitors)) {
+    if (isVisitorId(v?.id) && typeof v.x === 'number' && typeof v.y === 'number') {
+      visitors.push({
+        uid: uid++, id: v.id, x: v.x, y: v.y, col: num(v.col, -1), row: num(v.row, -1), perch: !!v.perch,
+        arrivedAt: num(v.arrivedAt, now), leavesAt: num(v.leavesAt, now),
+      });
+    }
+  }
+
+  let letter: Letter | null = null;
+  const l = data.letter;
+  if (l && CHARACTERS.includes(l.from) && typeof l.text === 'string' && Array.isArray(l.wants)) {
+    const wants: Want[] = l.wants.filter((w: any) =>
+      w && typeof w.n === 'number' && w.n > 0 &&
+      ((w.kind === 'crop' && isCropId(w.id)) || (w.kind === 'material' && isMaterialId(w.id))));
+    if (wants.length) {
+      letter = {
+        id: num(l.id, 0), from: l.from, text: l.text, wants, arrivedAt: num(l.arrivedAt, now),
+        reward: {
+          coins: Math.max(0, Math.floor(num(l.reward?.coins, 0))),
+          deco: isDecoId(l.reward?.deco) ? l.reward.deco : undefined,
+          materials: counts(l.reward?.materials, isMaterialId),
+        },
+      };
     }
   }
 
   return {
-    version: 1,
+    version: 2,
     createdAt: num(data.createdAt, now),
     updatedAt: num(data.updatedAt, now),
     coins: Math.max(0, Math.floor(num(data.coins, base.coins))),
     plots,
-    seeds: cropCounts(data.seeds),
-    basket: cropCounts(data.basket),
+    seeds: counts(data.seeds, isCropId),
+    basket: counts(data.basket, isCropId),
     selectedSeed: isCropId(data.selectedSeed) ? data.selectedSeed : null,
     lastSeason: SEASONS.includes(data.lastSeason) ? data.lastSeason : base.lastSeason,
+    materials: counts(data.materials, isMaterialId),
+    forage,
+    // Une ancienne sauvegarde (v1) découvre le jardin vivant avec quelques trouvailles déjà là.
+    nextForageAt: num(data.nextForageAt, base.nextForageAt),
+    decor: { placed, inventory: counts(data.decor?.inventory, isDecoId) },
+    visitors,
+    nextVisitorAt: num(data.nextVisitorAt, now),
+    letter,
+    nextLetterAt: num(data.nextLetterAt, now),
+    lettersDone: Math.max(0, Math.floor(num(data.lettersDone, 0))),
+    treeShakeAt: num(data.treeShakeAt, 0),
+    nextUid: uid,
     journal: {
-      crops: journalCrops,
+      crops: journalEntries(j.crops, isCropId, now),
+      visitors: journalEntries(j.visitors, isVisitorId, now),
       totalHarvests: Math.max(0, num(j.totalHarvests, 0)),
       coinsEarned: Math.max(0, num(j.coinsEarned, 0)),
       daysPlayed: Math.max(1, num(j.daysPlayed, 1)),
       lastDay: typeof j.lastDay === 'string' ? j.lastDay : base.journal.lastDay,
+      forageCount: Math.max(0, num(j.forageCount, 0)),
+      lettersDelivered: Math.max(0, num(j.lettersDelivered, 0)),
     },
     settings: {
       lang: data.settings?.lang === 'fr' || data.settings?.lang === 'en' ? data.settings.lang : null,
@@ -175,13 +316,18 @@ export class Game {
     state: GameState,
     private storage: Storage | null = null,
     private clock: () => number = () => Date.now(),
+    private random: () => number = Math.random,
   ) {
     this.state = state;
     this.ripeKnown = state.plots.map((t) => !!t.plant && isRipe(t.plant));
   }
 
   /** Charge la partie (ou en crée une) et calcule ce qui s'est passé pendant l'absence. */
-  static load(storage: Storage | null, clock: () => number = () => Date.now()): { game: Game; report: LoadReport } {
+  static load(
+    storage: Storage | null,
+    clock: () => number = () => Date.now(),
+    random: () => number = Math.random,
+  ): { game: Game; report: LoadReport } {
     const now = clock();
     let state: GameState | null = null;
     let isNew = true;
@@ -194,7 +340,7 @@ export class Game {
     state ??= createNewGame(now);
 
     const awayMs = isNew ? 0 : Math.max(0, now - state.updatedAt);
-    const game = new Game(state, storage, clock);
+    const game = new Game(state, storage, clock, random);
     game.advanceAll(now, false);
 
     const season = getSeason(new Date(now));
@@ -204,6 +350,7 @@ export class Game {
       state.lastSeason = season;
     }
     game.touchDay(now, false);
+    game.updateWorld(now, true, false);
 
     const readyCount = state.plots.filter((t) => t.plant && isRipe(t.plant)).length;
     game.ripeKnown = state.plots.map((t) => !!t.plant && isRipe(t.plant));
@@ -222,6 +369,10 @@ export class Game {
     return getSeason(new Date(this.now()));
   }
 
+  get night(): boolean {
+    return isNight(new Date(this.now()));
+  }
+
   onChange(fn: (s: GameState) => void): () => void {
     this.changeListeners.add(fn);
     return () => this.changeListeners.delete(fn);
@@ -232,7 +383,7 @@ export class Game {
     return () => this.eventListeners.delete(fn);
   }
 
-  /** Appelé régulièrement : fait pousser, détecte les plantes qui mûrissent et le changement de saison. */
+  /** Appelé chaque seconde : pousse, saison, et vie du jardin (trouvailles, visiteurs, courrier). */
   tick(): void {
     const now = this.now();
     this.advanceAll(now, true);
@@ -243,6 +394,7 @@ export class Game {
       this.emitEvent({ type: 'seasonChanged', from, to: season });
     }
     this.touchDay(now, true);
+    if (this.updateWorld(now, false, true)) this.commit();
   }
 
   private advanceAll(now: number, emit: boolean): void {
@@ -266,7 +418,142 @@ export class Game {
     }
   }
 
-  // --- Actions du joueur ----------------------------------------------------
+  // --- Le jardin vivant -------------------------------------------------------
+
+  private between([min, max]: [number, number]): number {
+    return min + this.random() * (max - min);
+  }
+
+  private pickWeighted<T>(items: Array<[T, number]>): T | null {
+    const total = items.reduce((s, [, w]) => s + w, 0);
+    if (total <= 0) return null;
+    let r = this.random() * total;
+    for (const [item, w] of items) {
+      r -= w;
+      if (r < 0) return item;
+    }
+    return items[items.length - 1][0];
+  }
+
+  /** Une case d'herbe libre : pas de déco, pas de trouvaille, pas de visiteur. */
+  isTileFree(col: number, row: number, ignoreVisitors = false): boolean {
+    if (isStaticBlocked(col, row)) return false;
+    const s = this.state;
+    if (s.decor.placed.some((d) => d.col === col && d.row === row)) return false;
+    if (s.forage.some((f) => f.col === col && f.row === row)) return false;
+    if (!ignoreVisitors && s.visitors.some((v) => v.col === col && v.row === row)) return false;
+    return true;
+  }
+
+  private randomFreeTile(candidates: Array<[number, number]> = gardenTiles()): [number, number] | null {
+    const free = candidates.filter(([c, r]) => this.isTileFree(c, r));
+    return free.length ? free[Math.floor(this.random() * free.length) % free.length] : null;
+  }
+
+  private spawnForage(id?: MaterialId, candidates?: Array<[number, number]>): ForageItem | null {
+    const material = id ?? this.pickWeighted(forageTable(this.season));
+    const tile = this.randomFreeTile(candidates);
+    if (!material || !tile) return null;
+    const item: ForageItem = { uid: this.state.nextUid++, id: material, col: tile[0], row: tile[1] };
+    this.state.forage.push(item);
+    return item;
+  }
+
+  /** Où un visiteur pourrait se poser maintenant (null s'il n'a pas de place). */
+  private visitorSpot(def: VisitorDef): Omit<VisitorInstance, 'uid' | 'id' | 'arrivedAt' | 'leavesAt'> | null {
+    const s = this.state;
+    const spot = def.spot;
+    if (spot.kind === 'tree') {
+      const p = spot.perch ? TREE_SPOTS.perch : TREE_SPOTS.base;
+      const key = spot.perch ? -2 : -3; // cases virtuelles de l'arbre
+      if (s.visitors.some((v) => v.col === key)) return null;
+      return { x: p.x, y: p.y, col: key, row: key, perch: spot.perch };
+    }
+    if (spot.kind === 'grass') {
+      const tile = this.randomFreeTile();
+      if (!tile) return null;
+      const foot = tileFoot(tile[0], tile[1]);
+      return { x: foot.x + Math.round(this.random() * 4 - 2), y: foot.y - 1, col: tile[0], row: tile[1], perch: false };
+    }
+    const decos = s.decor.placed.filter((d) => d.id === spot.deco);
+    if (spot.perch) {
+      const free = decos.filter((d) => !s.visitors.some((v) => v.perch && v.col === d.col && v.row === d.row));
+      if (!free.length) return null;
+      const d = free[Math.floor(this.random() * free.length) % free.length];
+      const foot = tileFoot(d.col, d.row);
+      return { x: foot.x, y: foot.y - 22, col: d.col, row: d.row, perch: true };
+    }
+    const around: Array<[number, number]> = [];
+    for (const d of decos) {
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if (dc || dr) around.push([d.col + dc, d.row + dr]);
+    }
+    const tile = this.randomFreeTile(around);
+    if (!tile) return null;
+    const foot = tileFoot(tile[0], tile[1]);
+    return { x: foot.x, y: foot.y - 1, col: tile[0], row: tile[1], perch: false };
+  }
+
+  private spawnVisitor(now: number): VisitorInstance | null {
+    const s = this.state;
+    const season = this.season;
+    const night = isNight(new Date(now));
+    const candidates: Array<[VisitorDef, number]> = VISITOR_IDS
+      .map((id) => VISITORS[id])
+      .filter((d) => d.seasons.includes(season) && visitorAwake(d, night) && !s.visitors.some((v) => v.id === d.id))
+      // Les visiteurs jamais vus viennent un peu plus souvent : la collection avance.
+      .map((d) => [d, d.weight * (s.journal.visitors[d.id] ? 1 : 1.6)]);
+    while (candidates.length) {
+      const def = this.pickWeighted(candidates);
+      if (!def) return null;
+      const spot = this.visitorSpot(def);
+      if (spot) {
+        const v: VisitorInstance = { uid: s.nextUid++, id: def.id, arrivedAt: now, leavesAt: now + this.between(VISITOR_STAY), ...spot };
+        s.visitors.push(v);
+        return v;
+      }
+      candidates.splice(candidates.findIndex(([d]) => d === def), 1);
+    }
+    return null;
+  }
+
+  /** Fait vivre le jardin jusqu'à `now`. `catchUp` : retour après une absence. Renvoie true si quelque chose a changé. */
+  updateWorld(now: number, catchUp: boolean, emit: boolean): boolean {
+    const s = this.state;
+    let changed = false;
+
+    // Trouvailles : elles ne disparaissent jamais, il y en a juste un nombre maximum.
+    while (now >= s.nextForageAt && s.forage.length < FORAGE_MAX) {
+      if (!this.spawnForage()) break;
+      s.nextForageAt += this.between(FORAGE_INTERVAL);
+      changed = true;
+    }
+    if (now >= s.nextForageAt) s.nextForageAt = now + this.between(FORAGE_INTERVAL);
+
+    // Visiteurs : ils repartent tranquillement ; d'autres arrivent.
+    const night = isNight(new Date(now));
+    const season = this.season;
+    const before = s.visitors.length;
+    s.visitors = s.visitors.filter((v) => {
+      const def = VISITORS[v.id];
+      return v.leavesAt > now && def.seasons.includes(season) && visitorAwake(def, night);
+    });
+    if (s.visitors.length !== before) changed = true;
+    if (now >= s.nextVisitorAt) {
+      const arrivals = catchUp ? 2 : 1;
+      for (let i = 0; i < arrivals && s.visitors.length < VISITOR_MAX; i++) if (this.spawnVisitor(now)) changed = true;
+      s.nextVisitorAt = now + this.between(VISITOR_INTERVAL);
+    }
+
+    // Courrier
+    if (!s.letter && now >= s.nextLetterAt) {
+      s.letter = makeLetter(s.lettersDone, this.season, this.random, now);
+      changed = true;
+      if (emit) this.emitEvent({ type: 'letterArrived' });
+    }
+    return changed;
+  }
+
+  // --- Potager ----------------------------------------------------------------
 
   tillCost(): number {
     return tillCost(this.state.plots.filter((t) => t.tilled).length);
@@ -319,23 +606,33 @@ export class Game {
     tile.plant = null;
     this.ripeKnown[index] = false;
     this.state.basket[crop] = (this.state.basket[crop] ?? 0) + 1;
-    const entry = this.state.journal.crops[crop];
-    const first = !entry;
-    this.state.journal.crops[crop] = { count: (entry?.count ?? 0) + 1, firstAt: entry?.firstAt ?? this.now() };
+    const first = this.addJournal(this.state.journal.crops, crop);
     this.state.journal.totalHarvests += 1;
     this.commit();
     return { ok: true, crop, first };
   }
+
+  private addJournal<K extends string>(entries: Partial<Record<K, JournalEntry>>, key: K): boolean {
+    const entry = entries[key];
+    entries[key] = { count: (entry?.count ?? 0) + 1, firstAt: entry?.firstAt ?? this.now() };
+    return !entry;
+  }
+
+  // --- Boutique ---------------------------------------------------------------
 
   buySeeds(cropId: CropId, qty: number): ActionResult<{ cost: number }> {
     if (CROPS[cropId].season !== this.season) return { ok: false, reason: 'outOfSeason' };
     const cost = CROPS[cropId].seedPrice * qty;
     if (this.state.coins < cost) return { ok: false, reason: 'notEnoughCoins' };
     this.state.coins -= cost;
-    this.state.seeds[cropId] = (this.state.seeds[cropId] ?? 0) + qty;
-    if (!this.state.selectedSeed || !this.state.seeds[this.state.selectedSeed]) this.state.selectedSeed = cropId;
+    this.addSeeds(cropId, qty);
     this.commit();
     return { ok: true, cost };
+  }
+
+  private addSeeds(cropId: CropId, qty: number): void {
+    this.state.seeds[cropId] = (this.state.seeds[cropId] ?? 0) + qty;
+    if (!this.state.selectedSeed || !this.state.seeds[this.state.selectedSeed]) this.state.selectedSeed = cropId;
   }
 
   sell(cropId: CropId, qty: number): ActionResult<{ earned: number }> {
@@ -345,8 +642,7 @@ export class Game {
     const earned = CROPS[cropId].sellPrice * n;
     this.state.basket[cropId] = have - n;
     if (this.state.basket[cropId] === 0) delete this.state.basket[cropId];
-    this.state.coins += earned;
-    this.state.journal.coinsEarned += earned;
+    this.earn(earned);
     this.commit();
     return { ok: true, earned };
   }
@@ -359,16 +655,206 @@ export class Game {
     }
     if (earned === 0) return { ok: false, reason: 'nothingToSell' };
     this.state.basket = {};
-    this.state.coins += earned;
-    this.state.journal.coinsEarned += earned;
+    this.earn(earned);
     this.commit();
     return { ok: true, earned };
+  }
+
+  private earn(coins: number): void {
+    this.state.coins += coins;
+    this.state.journal.coinsEarned += coins;
   }
 
   selectSeed(cropId: CropId): void {
     this.state.selectedSeed = cropId;
     this.commit();
   }
+
+  // --- Cueillette, arbre, visiteurs -------------------------------------------
+
+  private addMaterial(id: MaterialId, n: number): void {
+    this.state.materials[id] = (this.state.materials[id] ?? 0) + n;
+  }
+
+  collect(uid: number): ActionResult<{ material: MaterialId }> {
+    const i = this.state.forage.findIndex((f) => f.uid === uid);
+    if (i < 0) return { ok: false, reason: 'notFound' };
+    const [item] = this.state.forage.splice(i, 1);
+    this.addMaterial(item.id, 1);
+    this.state.journal.forageCount += 1;
+    this.commit();
+    return { ok: true, material: item.id };
+  }
+
+  /** Secouer l'arbre : des feuilles tombent toujours, une brindille de temps en temps. */
+  shakeTree(): { dropped: ForageItem | null } {
+    const now = this.now();
+    if (now < this.state.treeShakeAt) return { dropped: null };
+    const id: MaterialId = this.season === 'winter' && this.random() < 0.5 ? 'pinecone' : 'twig';
+    const dropped = this.spawnForage(id, [...TREE_DROP_TILES]);
+    if (!dropped) return { dropped: null };
+    this.state.treeShakeAt = now + TREE_SHAKE_COOLDOWN;
+    this.commit();
+    return { dropped };
+  }
+
+  greet(uid: number): ActionResult<{ visitor: VisitorId; first: boolean; gift: GiftResult | null }> {
+    const i = this.state.visitors.findIndex((v) => v.uid === uid);
+    if (i < 0) return { ok: false, reason: 'notFound' };
+    const [v] = this.state.visitors.splice(i, 1);
+    const first = this.addJournal(this.state.journal.visitors, v.id);
+    let gift: GiftResult | null = null;
+    if (first || this.random() < VISITOR_GIFT_CHANCE) {
+      const g = VISITORS[v.id].gift;
+      gift = {};
+      if (g.coins) {
+        gift.coins = Math.round(this.between(g.coins));
+        this.earn(gift.coins);
+      }
+      if (g.material) {
+        gift.material = g.material;
+        this.addMaterial(g.material[0], g.material[1]);
+      }
+      if (g.seeds) {
+        const quick = cropsForSeason(this.season).sort((a, b) => a.growTime - b.growTime)[0];
+        gift.seeds = [quick.id, g.seeds];
+        this.addSeeds(quick.id, g.seeds);
+      }
+    }
+    // Le prochain visiteur ne tarde pas trop après un salut.
+    this.state.nextVisitorAt = Math.min(this.state.nextVisitorAt, this.now() + VISITOR_INTERVAL[0]);
+    this.commit();
+    return { ok: true, visitor: v.id, first, gift };
+  }
+
+  // --- Atelier et déco ----------------------------------------------------------
+
+  /** Ce qui manque pour une recette (vide = on peut fabriquer). */
+  missingFor(recipe: Recipe): Array<{ kind: 'material' | 'crop' | 'coins' | 'season'; id?: string; missing: number }> {
+    const s = this.state;
+    const out: Array<{ kind: 'material' | 'crop' | 'coins' | 'season'; id?: string; missing: number }> = [];
+    for (const [id, n] of Object.entries(recipe.materials ?? {}) as Array<[MaterialId, number]>) {
+      const have = s.materials[id] ?? 0;
+      if (have < n) out.push({ kind: 'material', id, missing: n - have });
+    }
+    for (const [id, n] of Object.entries(recipe.crops ?? {}) as Array<[CropId, number]>) {
+      const have = s.basket[id] ?? 0;
+      if (have < n) out.push({ kind: 'crop', id, missing: n - have });
+    }
+    if ((recipe.coins ?? 0) > s.coins) out.push({ kind: 'coins', missing: (recipe.coins ?? 0) - s.coins });
+    if (recipe.season && recipe.season !== this.season) out.push({ kind: 'season', id: recipe.season, missing: 1 });
+    return out;
+  }
+
+  canCraft(id: DecoId): boolean {
+    return this.missingFor(DECOS[id].recipe).length === 0;
+  }
+
+  craft(id: DecoId): ActionResult<{ deco: DecoId }> {
+    const recipe = DECOS[id].recipe;
+    const missing = this.missingFor(recipe);
+    if (missing.length) return { ok: false, reason: missing[0].kind === 'coins' ? 'notEnoughCoins' : missing[0].kind === 'season' ? 'outOfSeason' : 'missingItems' };
+    const s = this.state;
+    for (const [m, n] of Object.entries(recipe.materials ?? {}) as Array<[MaterialId, number]>) {
+      s.materials[m] = (s.materials[m] ?? 0) - n;
+      if (!s.materials[m]) delete s.materials[m];
+    }
+    for (const [c, n] of Object.entries(recipe.crops ?? {}) as Array<[CropId, number]>) {
+      s.basket[c] = (s.basket[c] ?? 0) - n;
+      if (!s.basket[c]) delete s.basket[c];
+    }
+    s.coins -= recipe.coins ?? 0;
+    s.decor.inventory[id] = (s.decor.inventory[id] ?? 0) + 1;
+    this.commit();
+    return { ok: true, deco: id };
+  }
+
+  /** Prend une déco de l'inventaire « en main » pour la poser. */
+  takeDeco(id: DecoId): boolean {
+    const inv = this.state.decor.inventory;
+    if (!inv[id]) return false;
+    inv[id]! -= 1;
+    if (!inv[id]) delete inv[id];
+    this.commit();
+    return true;
+  }
+
+  returnDeco(id: DecoId): void {
+    const inv = this.state.decor.inventory;
+    inv[id] = (inv[id] ?? 0) + 1;
+    this.commit();
+  }
+
+  canPlace(col: number, row: number): boolean {
+    return this.isTileFree(col, row, true);
+  }
+
+  placeDeco(id: DecoId, col: number, row: number): ActionResult<{ uid: number }> {
+    if (!this.canPlace(col, row)) return { ok: false, reason: 'blocked' };
+    const uid = this.state.nextUid++;
+    this.state.decor.placed.push({ uid, id, col, row });
+    this.commit();
+    return { ok: true, uid };
+  }
+
+  decoAt(col: number, row: number): PlacedDeco | undefined {
+    return this.state.decor.placed.find((d) => d.col === col && d.row === row);
+  }
+
+  /** Retire une déco posée (elle passe « en main »). */
+  pickUpDeco(col: number, row: number): DecoId | null {
+    const placed = this.state.decor.placed;
+    const i = placed.findIndex((d) => d.col === col && d.row === row);
+    if (i < 0) return null;
+    const [d] = placed.splice(i, 1);
+    // Un oiseau perché sur ce nichoir s'envole.
+    this.state.visitors = this.state.visitors.filter((v) => !(v.perch && v.col === col && v.row === row));
+    this.commit();
+    return d.id;
+  }
+
+  // --- Courrier ---------------------------------------------------------------
+
+  have(w: Want): number {
+    return w.kind === 'crop' ? this.state.basket[w.id] ?? 0 : this.state.materials[w.id] ?? 0;
+  }
+
+  canDeliver(): boolean {
+    return !!this.state.letter && this.state.letter.wants.every((w) => this.have(w) >= w.n);
+  }
+
+  deliverLetter(): ActionResult<{ letter: Letter }> {
+    const s = this.state;
+    const letter = s.letter;
+    if (!letter) return { ok: false, reason: 'noLetter' };
+    if (!this.canDeliver()) return { ok: false, reason: 'missingItems' };
+    for (const w of letter.wants) {
+      const bag: Partial<Record<string, number>> = w.kind === 'crop' ? s.basket : s.materials;
+      bag[w.id] = (bag[w.id] ?? 0) - w.n;
+      if (!bag[w.id]) delete bag[w.id];
+    }
+    this.earn(letter.reward.coins);
+    if (letter.reward.deco) s.decor.inventory[letter.reward.deco] = (s.decor.inventory[letter.reward.deco] ?? 0) + 1;
+    for (const [m, n] of Object.entries(letter.reward.materials ?? {}) as Array<[MaterialId, number]>) this.addMaterial(m, n);
+    s.letter = null;
+    s.lettersDone += 1;
+    s.journal.lettersDelivered += 1;
+    s.nextLetterAt = this.now() + this.between(LETTER_DELAY);
+    this.commit();
+    return { ok: true, letter };
+  }
+
+  /** Décliner poliment : pas de pénalité, une autre lettre arrive un peu plus tard. */
+  skipLetter(): void {
+    const s = this.state;
+    if (!s.letter) return;
+    s.letter = null;
+    s.lettersDone += 1;
+    s.nextLetterAt = this.now() + LETTER_SKIP_DELAY;
+    this.commit();
+  }
+
+  // --- Divers -----------------------------------------------------------------
 
   setLang(lang: Lang): void {
     this.state.settings.lang = lang;
@@ -380,10 +866,9 @@ export class Game {
     this.state = createNewGame(this.now());
     this.state.settings.lang = lang;
     this.ripeKnown = this.state.plots.map(() => false);
+    this.updateWorld(this.now(), true, false);
     this.commit();
   }
-
-  // --- Sauvegarde -------------------------------------------------------------
 
   save(): void {
     this.state.updatedAt = this.now();

@@ -35,13 +35,34 @@ function demoSave(now, season) {
     if (k % 4 === 2) plots[i].wetUntil = now + 2 * HOUR;
   });
   const journalCrops = Object.fromEntries(crops.slice(0, 2).map((id) => [id, { count: 7, firstAt: now - 3 * 86400000 }]));
+  const seasonDeco = { spring: 'daisypot', summer: 'scarecrow', autumn: 'leafpile', winter: 'snowman' }[season];
+  const seasonMat = { spring: 'daisy', summer: 'feather', autumn: 'mushroom', winter: 'pinecone' }[season];
+  const placed = [
+    ['birdhouse', 0, 7], ['bench', 10, 9], ['lantern', 11, 6], ['flowerbed', 1, 10], [seasonDeco, 9, 7],
+    ['stepstone', 0, 4], ['pond', 10, 11], ['jackolantern', 2, 6],
+  ].map(([id, col, row], i) => ({ uid: 900 + i, id, col, row }));
   return {
+    decor: { placed, inventory: { pond: 1, lantern: 1 } },
+    materials: { twig: 5, pebble: 3, [seasonMat]: 2 },
+    lettersDone: 3,
     version: 1, createdAt: now - 3 * 86400000, updatedAt: now, coins: 137, plots,
     seeds: { [crops[0]]: 4, [crops[1]]: 2, [crops[2]]: 1 }, basket: { [crops[0]]: 3, [crops[1]]: 1 },
     selectedSeed: crops[1], lastSeason: season,
-    journal: { crops: journalCrops, totalHarvests: 14, coinsEarned: 210, daysPlayed: 4, lastDay: '' },
+    journal: {
+      crops: journalCrops, totalHarvests: 14, coinsEarned: 210, daysPlayed: 4, lastDay: '',
+      visitors: { sparrow: { count: 5, firstAt: now - 2 * 86400000 }, bluetit: { count: 2, firstAt: now - 86400000 }, squirrel: { count: 1, firstAt: now } },
+      forageCount: 23, lettersDelivered: 3,
+    },
     settings: { lang: 'fr' },
   };
+}
+
+/** Toucher un point du monde (pixels du jeu). */
+async function tapWorld(page, x, y) {
+  const box = await page.locator('#game canvas').boundingBox();
+  const zoom = Math.max(1, Math.floor(Math.min(box.width / 192, box.height / 208)));
+  await page.mouse.click(box.x + box.width / 2 + (x - 96) * zoom, box.y + box.height / 2 + (y - 104) * zoom);
+  await page.waitForTimeout(400);
 }
 
 async function shot(browser, name, { width, height, scale = 2, date, season, fresh = false, action, path = '' }) {
@@ -50,7 +71,7 @@ async function shot(browser, name, { width, height, scale = 2, date, season, fre
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-  if (date) await page.clock.setFixedTime(date);
+  if (date) await page.clock.setSystemTime(date);
   if (!fresh && season) {
     const save = demoSave(date ? date.getTime() : Date.now(), season);
     await page.addInitScript((s) => localStorage.setItem('chilloff.save.v1', s), JSON.stringify(save));
@@ -73,17 +94,22 @@ await shot(browser, 'desktop-autumn', { width: 1440, height: 900, scale: 1, date
 await shot(browser, 'mobile-winter-night', { width: 390, height: 844, date: new Date(2026, 11, 20, 23, 0), season: 'winter' });
 await shot(browser, 'mobile-spring', { width: 390, height: 844, date: new Date(2027, 3, 10, 10, 0), season: 'spring' });
 await shot(browser, 'mobile-summer-evening', { width: 390, height: 844, date: new Date(2027, 6, 10, 20, 0), season: 'summer' });
-await shot(browser, 'mobile-shop', {
+await shot(browser, 'mobile-letter', {
   width: 390, height: 844, date: autumnDay, season: 'autumn',
-  action: async (p) => { await p.click('.shop-btn'); await p.click('.tab:first-child'); await p.waitForTimeout(400); },
+  action: async (p) => { await tapWorld(p, 72, 52); },
 });
-await shot(browser, 'mobile-journal', {
+await shot(browser, 'mobile-workshop', {
   width: 390, height: 844, date: autumnDay, season: 'autumn',
-  action: async (p) => { await p.click('.icon-btn[aria-label="Journal"]'); await p.waitForTimeout(400); },
+  action: async (p) => { await p.click('.workshop-btn'); await p.click('.panel-workshop .tab:first-child'); await p.waitForTimeout(400); },
 });
-await shot(browser, 'desktop-sell', {
-  width: 1440, height: 900, scale: 1, date: autumnDay, season: 'autumn',
-  action: async (p) => { await p.click('.shop-btn'); await p.waitForTimeout(400); },
+await shot(browser, 'mobile-journal-visitors', {
+  width: 390, height: 844, date: autumnDay, season: 'autumn',
+  action: async (p) => { await p.click('.icon-btn[aria-label="Journal"]'); await p.click('.panel-journal .tab:nth-child(2)'); await p.waitForTimeout(400); },
 });
+await shot(browser, 'mobile-edit', {
+  width: 390, height: 844, date: autumnDay, season: 'autumn',
+  action: async (p) => { await p.click('.workshop-btn'); await p.click('.panel-workshop .btn.primary'); await p.waitForTimeout(400); },
+});
+await shot(browser, 'desktop-summer-night', { width: 1440, height: 900, scale: 1, date: new Date(2027, 6, 10, 23, 30), season: 'summer' });
 
 await browser.close();

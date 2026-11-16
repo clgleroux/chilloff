@@ -2,7 +2,10 @@
 
 import { HOUR, MINUTE } from '../game/config';
 import type { CropId } from '../game/crops';
-import type { Lang } from '../game/state';
+import type { DecoId } from '../game/decor';
+import type { MaterialId } from '../game/materials';
+import type { GiftResult, Lang } from '../game/state';
+import type { VisitorId } from '../game/visitors';
 import type { Season } from '../game/seasons';
 import { en } from './en';
 import { fr } from './fr';
@@ -47,6 +50,18 @@ export function t(key: string, params: Record<string, string | number> = {}): st
 
 export const cropName = (id: CropId) => t(`crop.${id}`);
 export const seasonName = (s: Season) => t(`season.${s}`);
+export const materialName = (id: MaterialId) => t(`material.${id}`);
+export const decoName = (id: DecoId) => t(`deco.${id}`);
+export const visitorName = (id: VisitorId) => t(`visitor.${id}`);
+
+/** « +5 pièces · +2 Brindille » */
+export function giftLabel(g: GiftResult): string {
+  const parts: string[] = [];
+  if (g.coins) parts.push(t('gift.coins', { n: g.coins }));
+  if (g.material) parts.push(t('gift.material', { n: g.material[1], name: materialName(g.material[0]) }));
+  if (g.seeds) parts.push(t('gift.seeds', { n: g.seeds[1], name: cropName(g.seeds[0]) }));
+  return parts.join(' · ');
+}
 
 /** Durée lisible : « 3 min », « 1 h 20 », « 2 j 4 h ». */
 export function formatDuration(ms: number): string {

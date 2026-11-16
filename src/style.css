@@ -241,6 +241,8 @@ img.px { image-rendering: pixelated; image-rendering: crisp-edges; flex-shrink: 
   z-index: 10;
 }
 .overlay.open { background: rgba(43, 34, 51, 0.55); }
+/* Un panneau qui se ferme ne bloque plus les touchers. */
+.overlay:not(.open) { pointer-events: none; }
 
 .panel {
   width: 100%;
@@ -423,6 +425,80 @@ img.silhouette { filter: brightness(0); opacity: 0.18; }
 @media (min-width: 720px) {
   #topbar { padding-left: 16px; padding-right: 16px; }
   .season-text strong { font-size: 17px; }
+}
+
+
+/* --- Jardin vivant : atelier, courrier, mode déco ------------------------------- */
+
+.workshop-btn { background: #c4823a; border-color: #8a5424; text-shadow: 0 1px 0 #8a5424; }
+.badge.dot { background: var(--gold); color: var(--ink); }
+#bottombar.editing .seedbar, #bottombar.editing .shop-btn { opacity: 0.45; pointer-events: none; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 4px;
+  background: var(--paper-light);
+  border: 2px solid var(--paper-dark);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.chip.ok { border-color: #8cc47a; background: #eef8e4; }
+.chip.missing { border-color: #e6b8a0; color: #a8543a; }
+
+.wants { display: flex; flex-wrap: wrap; gap: 12px; }
+.want { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.want small { font-size: 12px; color: var(--ink-soft); }
+
+.letter-paper {
+  margin: 4px 0 8px;
+  padding: 14px 16px;
+  background: #fffaf0;
+  border: 2px solid var(--paper-dark);
+  border-radius: var(--radius);
+  box-shadow: 2px 3px 0 rgba(59, 42, 53, 0.12);
+  transform: rotate(-0.4deg);
+}
+.letter-text { margin: 0 0 8px; font-size: 15px; line-height: 1.45; font-style: italic; }
+.letter-from { margin: 0; text-align: right; font-weight: 800; color: var(--wood); }
+.dialog-actions .spacer { flex: 1; }
+.small-btn { font-size: 12px; padding: 6px 8px; color: var(--ink-soft); border-color: transparent; box-shadow: none; }
+.small { font-size: 13px; }
+
+.bag { margin-bottom: 10px; }
+.bag .section-title { margin-top: 0; }
+.craft-card.ready { border-color: #8cc47a; }
+.attracts { color: var(--accent-dark) !important; font-weight: 700; }
+.journal-entry .hint { font-size: 10px; line-height: 1.25; margin-top: 2px; }
+
+#edit-banner {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 20px);
+  padding: 6px 6px 6px 10px;
+  background: var(--paper-light);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+  font-weight: 700;
+  z-index: 3;
+}
+#edit-banner[hidden] { display: none; }
+
+@media (max-width: 420px) {
+  .shop-btn { min-width: 64px; padding: 4px 4px; font-size: 12px; }
+  .seed { min-width: 60px; }
 }
 
 /* --- Planche de sprites (?atlas) ------------------------------------------------ */

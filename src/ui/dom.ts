@@ -19,6 +19,6 @@ export function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = 
   return el;
 }
 
-export function pixelImg(src: string, size = 32, extraClass = ''): HTMLImageElement {
-  return h('img', { src, width: size, height: size, alt: '', class: `px ${extraClass}`.trim(), draggable: 'false' });
+export function pixelImg(src: string, size = 32, extraClass = '', height = size): HTMLImageElement {
+  return h('img', { src, width: size, height, alt: '', class: `px ${extraClass}`.trim(), draggable: 'false' });
 }

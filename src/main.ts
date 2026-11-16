@@ -20,6 +20,8 @@ function start(): void {
   setLang(game.state.settings.lang ?? detectLang());
 
   const hud = new Hud(game);
+  // Pour les tests dans le navigateur (scripts/e2e.mjs) : ?debug expose la partie.
+  if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { chilloff: game });
   const scene = new GardenScene(game, hud);
 
   new Phaser.Game({
@@ -43,6 +45,7 @@ function start(): void {
   let mutedUntil = 0;
   game.onEvent((e) => {
     if (e.type === 'seasonChanged') hud.toast(t(`season.arrived.${e.to}`));
+    if (e.type === 'letterArrived') hud.toast(t('toast.letterArrived'));
     if (e.type === 'ripened' && Date.now() > mutedUntil) {
       ripeBuffer.push(e);
       if (ripeBuffer.length === 1) {

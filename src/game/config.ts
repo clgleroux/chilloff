@@ -35,3 +35,25 @@ export function tillCost(tilledCount: number): number {
 
 /** Au-delà de cette absence, on affiche un petit « bon retour ». */
 export const WELCOME_BACK_AFTER = 5 * MINUTE;
+
+// --- Le jardin vivant ---------------------------------------------------------
+
+/** Cueillette : une trouvaille apparaît toutes les 2 à 4 min, 5 au maximum dans l'herbe. */
+export const FORAGE_MAX = 5;
+export const FORAGE_INTERVAL: [number, number] = [2 * MINUTE, 4 * MINUTE];
+/** Trouvailles déjà présentes au tout début d'une partie. */
+export const FORAGE_AT_START = 4;
+
+/** Visiteurs : un nouveau toutes les 2 à 5 min, 3 au maximum, ils restent 20 à 40 min. */
+export const VISITOR_MAX = 3;
+export const VISITOR_INTERVAL: [number, number] = [2 * MINUTE, 5 * MINUTE];
+export const VISITOR_STAY: [number, number] = [20 * MINUTE, 40 * MINUTE];
+/** Après la première rencontre, un visiteur laisse un cadeau une fois sur deux environ. */
+export const VISITOR_GIFT_CHANCE = 0.6;
+
+/** Courrier : une nouvelle lettre 3 à 6 min après avoir répondu à la précédente. Jamais de délai pour répondre. */
+export const LETTER_DELAY: [number, number] = [3 * MINUTE, 6 * MINUTE];
+export const LETTER_SKIP_DELAY = 2 * MINUTE;
+
+/** Secouer l'arbre fait tomber une brindille, au plus toutes les 4 min. */
+export const TREE_SHAKE_COOLDOWN = 4 * MINUTE;
