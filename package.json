@@ -1,0 +1,28 @@
+{
+  "name": "chilloff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Un petit potager chill en temps réel, pour les pauses de 5 minutes.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "icons": "python3 scripts/generate_icons.py"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clgleroux/chilloff.git"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.65.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.1.0"
+  }
+}
