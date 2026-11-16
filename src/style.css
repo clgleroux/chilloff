@@ -472,7 +472,6 @@ img.silhouette { filter: brightness(0); opacity: 0.18; }
 .bag { margin-bottom: 10px; }
 .bag .section-title { margin-top: 0; }
 .craft-card.ready { border-color: #8cc47a; }
-.attracts { color: var(--accent-dark) !important; font-weight: 700; }
 .journal-entry .hint { font-size: 10px; line-height: 1.25; margin-top: 2px; }
 
 #edit-banner {

@@ -23,10 +23,30 @@ Jouable sur mobile et sur ordinateur, installable comme une appli (PWA).
 - **Courrier** : Mamie Rose, Léon le facteur, Capucine et Basile le boulanger écrivent de petites demandes. Aucun délai : on répond quand on veut, ou on décline poliment.
 - **L'arbre** se secoue : des feuilles tombent, et parfois une brindille.
 - **Atelier** : 11 décos à fabriquer (nichoir, banc, lanterne, mare, bonhomme de neige…) et à poser librement dans l'herbe.
-- **La déco attire des visiteurs** : la mésange se pose sur le nichoir, le chat fait la sieste près du banc, les lucioles brillent autour des lanternes les nuits d'été… 11 visiteurs à découvrir au fil des saisons, avec des indices dans le journal.
+- **La déco attire des visiteurs** : la mésange se pose sur le nichoir, le chat fait la sieste près du banc, les lucioles brillent autour des lanternes les nuits d'été… 11 visiteurs à découvrir au fil des saisons. Le jeu ne le dit nulle part : le journal ne montre que des silhouettes, et une petite note n'apparaît qu'après la rencontre.
 
 Une seule action par toucher : sur une case en friche → la défricher, sur la terre → planter la graine choisie,
 sur une plante → l'arroser, sur une plante mûre (qui scintille) → récolter. Trouvailles, visiteurs, boîte aux lettres et arbre se touchent aussi.
+
+## Principe de design : laisser découvrir
+
+Le jeu en dit le moins possible. Le joueur essaie, observe, se laisse porter, et découvre par lui-même
+(par exemple que certaines décos de l'atelier attirent des visiteurs). **C'est la règle pour toutes les prochaines features.**
+
+- **On explique les gestes, jamais les secrets.** L'interface peut dire où toucher ou comment poser une déco. Elle ne dit pas qui viendra, quand, ni pourquoi.
+- **Pas de chiffres sur la magie du jardin.** Les prix et les temps de pousse restent affichés (on en a besoin pour décider), mais pas les multiplicateurs, les probabilités, les conditions d'apparition ni les minuteurs.
+- **Une description parle de l'objet, pas de son effet.** « Une maisonnette en bois, avec un trou tout rond », pas « Attire la mésange ».
+- **Le journal raconte après coup.** Avant une découverte : une silhouette et « ??? ». Après : le nom et une petite note d'observation.
+- **Montrer plutôt que dire.** Un indice passe par le monde (une plume près du nichoir, un bruissement dans les feuilles, la lettre d'un voisin) plutôt que par un texte d'aide.
+- **Une nouveauté arrive sans prévenir.** Pas de tutoriel ni de fenêtre « Nouveau ! » : un petit toast au moment où le joueur tombe dessus suffit.
+- **Jamais de cul-de-sac silencieux.** Si une action échoue, le jeu le montre (sans forcément expliquer pourquoi), pour que la découverte reste un plaisir et pas une frustration.
+- **Le README et le code peuvent tout dire ; c'est le jeu qui se tait.**
+
+Appliqué à la feuille de route, ça donne par exemple :
+
+- *Croisements* : aucune explication. Un jour, une variété rare pousse entre deux plantes voisines, et une silhouette du journal se révèle.
+- *Compagnon* : il s'installe de lui-même, sans annonce ; ses accessoires se découvrent en essayant.
+- *Jalons du journal* : la déco débloquée arrive comme une surprise (une lettre, un cadeau), pas comme une barre de progression.
 
 ## Lancer le jeu
 
