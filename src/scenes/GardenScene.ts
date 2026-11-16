@@ -11,7 +11,7 @@ import { growthStage, isRipe, isWet, timeUntilRipe } from '../game/growth';
 import type { Season } from '../game/seasons';
 import type { ForageItem, Game, GiftResult, PlacedDeco, VisitorInstance } from '../game/state';
 import { GARDEN_MAX_ROW, GARDEN_MIN_ROW, MAILBOX_TILE, TREE_POS, tileFoot } from '../game/world';
-import { accessoryName, cropName, formatDuration, giftLabel, materialName, t, visitorName } from '../i18n';
+import { cropName, formatDuration, giftLabel, materialName, t, visitorName } from '../i18n';
 import { edit } from '../ui/edit';
 import { Corgi } from './Corgi';
 
@@ -634,7 +634,8 @@ export class GardenScene extends Phaser.Scene {
     const name = g.state.companion.name;
     if (!name) { this.hooks.nameCompanion(); return; }
     if (this.corgi.sleeping) this.hooks.toast(t('companion.sleeping', { name }));
-    else if (res.unlocked) this.hooks.toast(t('companion.unlocked', { name, accessory: accessoryName(res.unlocked) }));
+    // Laisser découvrir : un cœur de plus se ressent, l'accessoire se découvre dans le journal.
+    else if (res.unlocked) this.hooks.toast(t('companion.unlocked', { name }));
     else if (res.dailyBonus) this.hooks.toast(t('companion.daily', { name }));
     else if (res.counted) this.hooks.toast(t('companion.happy', { name }));
   }

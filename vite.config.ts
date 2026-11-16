@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 // `base: './'` : le build fonctionne aussi bien sur GitHub Pages (/chilloff/) qu'en local.
-import pkg from './package.json';
+import pkg from './package.json' with { type: 'json' };
 
 export default defineConfig({
   base: './',

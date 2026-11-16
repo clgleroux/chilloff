@@ -1,7 +1,7 @@
 // Interface HTML par-dessus le jeu : barre du haut, graines, boutique, journal, options, bulles.
 
 import { corgiUrl, cropIconUrl, decoIconUrl, materialIconUrl, textureUrl, uiIconUrl, visitorIconUrl } from '../art/textures';
-import { ACCESSORY_IDS, NAME_MAX_LENGTH, accessoryHearts, pointsToNextHeart, type AccessoryId } from '../game/companion';
+import { ACCESSORY_IDS, NAME_MAX_LENGTH, accessoryHearts, type AccessoryId } from '../game/companion';
 import { CROPS, CROP_IDS, cropsForSeason, type CropId } from '../game/crops';
 import { DECOS, DECO_IDS, type DecoId, type Recipe } from '../game/decor';
 import type { Want } from '../game/letters';
@@ -400,33 +400,39 @@ export class Hud implements SceneHooks {
     const g = this.game;
     const c = g.state.companion;
     const hearts = g.companionHearts;
-    const toNext = pointsToNextHeart(c.friendship);
+    const name = c.name ?? t('companion.tab');
     const heartUrl = textureUrl('fx_heart');
+    // Laisser découvrir : pas de compteur ni de condition. On voit les cœurs gagnés, une petite note,
+    // et les accessoires restent des silhouettes tant qu'ils ne sont pas débloqués.
     const accessoryBtn = (id: AccessoryId | null) => {
-      const need = id ? accessoryHearts(id) : 0;
-      const locked = hearts < need;
+      const locked = !!id && hearts < accessoryHearts(id);
       const active = c.accessory === id;
-      return h('button', {
-        class: `journal-entry accessory${active ? ' active' : ''}${locked ? ' unknown' : ''}`, disabled: locked,
-        'aria-pressed': String(active), onclick: () => g.setAccessory(id),
+      const btn: HTMLButtonElement = h('button', {
+        class: `journal-entry accessory${active ? ' active' : ''}${locked ? ' unknown' : ''}`,
+        'aria-pressed': String(active),
+        onclick: () => {
+          if (!locked) { g.setAccessory(id); return; }
+          // Jamais d'échec silencieux : la carte se secoue, sans rien expliquer.
+          btn.classList.remove('nope');
+          void btn.offsetWidth;
+          btn.classList.add('nope');
+        },
       },
         pixelImg(corgiUrl(locked ? null : id), 48, locked ? 'silhouette' : ''),
-        h('strong', {}, id ? accessoryName(id) : t('companion.none')),
-        locked ? h('small', {}, t('companion.locked', { n: need })) : null,
+        h('strong', {}, locked ? t('journal.unknown') : id ? accessoryName(id) : t('companion.none')),
       );
+      return btn;
     };
     return [
       h('div', { class: 'companion-card' },
         pixelImg(corgiUrl(c.accessory), 96),
         h('div', { class: 'card-main' },
-          h('strong', { class: 'companion-name' }, c.name ?? t('companion.tab')),
-          h('div', { class: 'hearts', 'aria-label': `${hearts}/5` },
-            ...[1, 2, 3, 4, 5].map((i) => pixelImg(heartUrl, 21, i <= hearts ? '' : 'empty-heart', 18))),
-          h('small', {}, toNext ? t('companion.next', { n: toNext }) : t('companion.max')),
+          h('strong', { class: 'companion-name' }, name),
+          hearts ? h('div', { class: 'hearts' }, ...Array.from({ length: hearts }, () => pixelImg(heartUrl, 21, '', 18))) : null,
+          h('small', {}, t(`companion.bond.${hearts}`, { name })),
           h('button', { class: 'btn small-btn', onclick: () => this.nameCompanion() }, t('companion.renameBtn')),
         ),
       ),
-      h('p', { class: 'muted small' }, t('companion.tips')),
       h('p', { class: 'section-title' }, t('companion.accessories')),
       h('div', { class: 'journal-grid' }, accessoryBtn(null), ...ACCESSORY_IDS.map((id) => accessoryBtn(id))),
     ];
@@ -567,7 +573,10 @@ export class Hud implements SceneHooks {
           // Laisser découvrir : on décrit l'objet, jamais le visiteur qu'il attire.
           h('small', {}, t(`deco.hint.${id}`)),
           seasonLocked ? h('small', { class: 'muted' }, t('workshop.onlySeason', { season: seasonName(def.recipe.season!) })) : null,
-          stock || placed ? h('small', { class: 'stock' }, t('workshop.stock', { n: stock, p: placed })) : null,
+          stock || placed ? h('small', { class: 'stock' }, [
+            stock ? t('workshop.toPlace', { n: stock }) : '',
+            placed ? t('workshop.inGarden', { n: placed }) : '',
+          ].filter(Boolean).join(' · ')) : null,
           this.recipeChips(def.recipe),
         ),
         h('div', { class: 'card-actions' },

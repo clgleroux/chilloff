@@ -39,7 +39,6 @@ function start(): void {
   if (report.isNew) hud.toast(t('toast.welcome'));
   else if (report.awayMs > 0) welcomeBack(game, hud);
   if (report.seasonChanged) hud.toast(t(`season.arrived.${report.seasonChanged.to}`));
-  if (!game.state.companion.name) setTimeout(() => hud.toast(t('companion.arrived')), report.isNew ? 3500 : 800);
 
   // Événements en cours de partie (plantes mûres regroupées, saison qui change).
   let ripeBuffer: GameEvent[] = [];
@@ -47,7 +46,6 @@ function start(): void {
   game.onEvent((e) => {
     if (e.type === 'seasonChanged') hud.toast(t(`season.arrived.${e.to}`));
     if (e.type === 'letterArrived') hud.toast(t('toast.letterArrived'));
-    if (e.type === 'letterReady') hud.toast(t('toast.letterReady'));
     if (e.type === 'ripened' && Date.now() > mutedUntil) {
       ripeBuffer.push(e);
       if (ripeBuffer.length === 1) {

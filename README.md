@@ -31,6 +31,8 @@ Un petit corgi s'installe dans le jardin (tu lui donnes son nom au premier câli
 renifle l'herbe, fait la sieste, **creuse de temps en temps pour déterrer une trouvaille**, et dort devant la porte la nuit.
 Un toucher = un câlin : l'amitié monte (un câlin compte toutes les 3 min, le premier du jour compte double) et chacun des
 5 cœurs débloque un accessoire (bandana, nœud, chapeau de paille, couronne de fleurs, écharpe), à choisir dans le journal.
+Fidèle au principe « laisser découvrir », le jeu n'en dit rien : il arrive sans annonce, le journal ne montre que les cœurs
+gagnés et une petite note, et les accessoires restent des silhouettes jusqu'à ce qu'on les débloque.
 
 Une seule action par toucher : sur une case en friche → la défricher, sur la terre → planter la graine choisie,
 sur une plante → l'arroser, sur une plante mûre (qui scintille) → récolter. Trouvailles, visiteurs, boîte aux lettres et arbre se touchent aussi.

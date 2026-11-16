@@ -132,10 +132,9 @@ assert.equal(s.letter.read, true);
 assert.equal(await page.evaluate(() => window.chilloffScene.letterBubble.visible), false);
 step('lettre lue : la bulle se cache');
 
-// … et revient avec une coche quand on a de quoi répondre ; la bulle elle-même s'ouvre au toucher.
+// … et revient avec une coche (sans texte) quand on a de quoi répondre ; la bulle elle-même s'ouvre au toucher.
 await page.evaluate(() => { const g = window.chilloff; g.state.materials.twig = 3; g.selectSeed(g.state.selectedSeed); });
 await page.waitForTimeout(1200);
-assert.match(await page.locator('#toast-root').innerText(), /tout ce qu’il faut/);
 assert.equal(await page.evaluate(() => window.chilloffScene.letterBubble.visible), true);
 assert.equal(await page.evaluate(() => window.chilloffScene.letterBubble.texture.key), 'ui_letter_ready');
 await tapWorld(72, 34);

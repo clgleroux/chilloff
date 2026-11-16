@@ -542,7 +542,8 @@ img.silhouette { filter: brightness(0); opacity: 0.18; }
 img.empty-heart { filter: grayscale(1) brightness(1.6); opacity: 0.45; }
 .journal-entry.accessory { font: inherit; color: inherit; cursor: pointer; }
 .journal-entry.accessory.active { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); background: #fff8dc; }
-.journal-entry.accessory:disabled { cursor: default; opacity: 1; }
+.journal-entry.accessory.nope { animation: nope 0.35s ease-in-out; }
+@keyframes nope { 25% { transform: translateX(-4px); } 50% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
 
 /* --- Planche de sprites (?atlas) ------------------------------------------------ */
 
