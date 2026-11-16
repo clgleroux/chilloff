@@ -49,3 +49,21 @@ describe('pixel art du jardin vivant', () => {
     for (const [k, s] of Object.entries(MAILBOX_SPRITES)) checkSprite(`boîte ${k}`, s, 16, 24);
   });
 });
+
+import { ACCESSORY_SPRITES, CHECK_BADGE, CORGI_FRAMES, CORGI_PALETTE, HOLE, ZZZ } from '../src/art/living-sprites';
+
+describe('pixel art du compagnon', () => {
+  it('le corgi fait 16×16 et ses accessoires tiennent dans le dessin', () => {
+    for (const [k, rows] of Object.entries(CORGI_FRAMES)) checkGrid(`corgi ${k}`, rows, 16, 16, new Set(['.', ...Object.keys(CORGI_PALETTE)]));
+    for (const [k, a] of Object.entries(ACCESSORY_SPRITES)) {
+      checkSprite(`accessoire ${k}`, a, a.rows[0].length, a.rows.length);
+      for (const [x, y] of [a.anchor.walk, a.anchor.sleep]) {
+        expect(x + a.rows[0].length, `${k} déborde à droite`).toBeLessThanOrEqual(16);
+        expect(y + a.rows.length, `${k} déborde en bas`).toBeLessThanOrEqual(16);
+      }
+    }
+    checkSprite('zzz', ZZZ, 4, 4);
+    checkSprite('trou', HOLE, 10, 4);
+    checkSprite('coche', CHECK_BADGE, 6, 6);
+  });
+});

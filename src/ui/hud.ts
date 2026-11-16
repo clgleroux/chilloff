@@ -1,6 +1,7 @@
 // Interface HTML par-dessus le jeu : barre du haut, graines, boutique, journal, options, bulles.
 
-import { cropIconUrl, decoIconUrl, materialIconUrl, uiIconUrl, visitorIconUrl } from '../art/textures';
+import { corgiUrl, cropIconUrl, decoIconUrl, materialIconUrl, textureUrl, uiIconUrl, visitorIconUrl } from '../art/textures';
+import { ACCESSORY_IDS, NAME_MAX_LENGTH, accessoryHearts, pointsToNextHeart, type AccessoryId } from '../game/companion';
 import { CROPS, CROP_IDS, cropsForSeason, type CropId } from '../game/crops';
 import { DECOS, DECO_IDS, type DecoId, type Recipe } from '../game/decor';
 import type { Want } from '../game/letters';
@@ -9,13 +10,13 @@ import { SEASONS, daysUntilNextSeason, nextSeason, type Season } from '../game/s
 import type { Game, Lang } from '../game/state';
 import { VISITOR_IDS } from '../game/visitors';
 import {
-  cropName, decoName, formatDate, formatDuration, getLang, materialName, onLangChange, seasonName, setLang, t, visitorName,
+  accessoryName, cropName, decoName, formatDate, formatDuration, getLang, materialName, onLangChange, seasonName, setLang, t, visitorName,
 } from '../i18n';
 import type { SceneHooks } from '../scenes/GardenScene';
 import { h, pixelImg } from './dom';
 import { edit } from './edit';
 
-type PanelKind = 'shop' | 'journal' | 'options' | 'dialog' | 'workshop' | 'letter';
+type PanelKind = 'shop' | 'journal' | 'options' | 'dialog' | 'workshop' | 'letter' | 'name';
 
 interface OpenPanel {
   kind: PanelKind;
@@ -30,7 +31,7 @@ export class Hud implements SceneHooks {
   private toastRoot = document.getElementById('toast-root')!;
   private panel: OpenPanel | null = null;
   private shopTab: 'buy' | 'sell' = 'buy';
-  private journalTab: 'harvests' | 'visitors' | 'notebook' = 'harvests';
+  private journalTab: 'harvests' | 'visitors' | 'companion' | 'notebook' = 'harvests';
   private workshopTab: 'craft' | 'mine' = 'craft';
   private banner = h('div', { id: 'edit-banner', hidden: true });
 
@@ -52,7 +53,7 @@ export class Hud implements SceneHooks {
     this.renderTop();
     this.renderBottom();
     this.renderBanner();
-    this.panel?.render();
+    if (this.panel?.kind !== 'name') this.panel?.render();
   }
 
   // --- Barre du haut ----------------------------------------------------------
@@ -164,6 +165,7 @@ export class Hud implements SceneHooks {
     const el = this.panel.el;
     this.panel = null;
     el.classList.remove('open');
+    el.classList.add('closing');
     setTimeout(() => el.remove(), 180);
   }
 
@@ -285,13 +287,18 @@ export class Hud implements SceneHooks {
 
   // --- Journal --------------------------------------------------------------
 
-  openJournal(): void {
+  openJournal(tab?: 'harvests' | 'visitors' | 'companion' | 'notebook'): void {
+    if (tab) this.journalTab = tab;
     this.openPanel('journal', () => [
       this.header(t('journal.title'), uiIconUrl('book')),
       this.tabs(this.journalTab, [
-        ['harvests', t('journal.tab.harvests')], ['visitors', t('journal.tab.visitors')], ['notebook', t('journal.tab.notebook')],
+        ['harvests', t('journal.tab.harvests')], ['visitors', t('journal.tab.visitors')],
+        ['companion', this.game.state.companion.name ?? t('companion.tab')], ['notebook', t('journal.tab.notebook')],
       ], (v) => (this.journalTab = v)),
-      ...(this.journalTab === 'harvests' ? this.journalHarvests() : this.journalTab === 'visitors' ? this.journalVisitors() : this.journalNotebook()),
+      ...(this.journalTab === 'harvests' ? this.journalHarvests()
+        : this.journalTab === 'visitors' ? this.journalVisitors()
+        : this.journalTab === 'companion' ? this.journalCompanion()
+        : this.journalNotebook()),
     ]);
   }
 
@@ -361,6 +368,70 @@ export class Hud implements SceneHooks {
     ];
   }
 
+  // --- Compagnon --------------------------------------------------------------
+
+  nameCompanion(): void {
+    const c = this.game.state.companion;
+    const input = h('input', {
+      type: 'text', class: 'name-input', maxlength: NAME_MAX_LENGTH, placeholder: t('companion.namePlaceholder'),
+      value: c.name ?? '', 'aria-label': t('companion.nameTitle'), autocomplete: 'off', enterkeyhint: 'done',
+    });
+    const confirm = () => {
+      const name = this.game.nameCompanion(input.value || t('companion.namePlaceholder'));
+      this.closePanel();
+      this.toast(t('companion.welcome', { name }));
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirm(); });
+    this.openPanel('name', () => [
+      h('div', { class: 'name-panel' },
+        pixelImg(corgiUrl(c.accessory), 96),
+        h('h2', {}, c.name ? t('companion.rename') : t('companion.nameTitle')),
+        c.name ? null : h('p', {}, t('companion.nameBody')),
+        input,
+        h('div', { class: 'dialog-actions' },
+          h('button', { class: 'btn primary', onclick: confirm }, t('companion.nameConfirm')),
+        ),
+      ),
+    ]);
+    setTimeout(() => input.focus(), 220);
+  }
+
+  private journalCompanion(): HTMLElement[] {
+    const g = this.game;
+    const c = g.state.companion;
+    const hearts = g.companionHearts;
+    const toNext = pointsToNextHeart(c.friendship);
+    const heartUrl = textureUrl('fx_heart');
+    const accessoryBtn = (id: AccessoryId | null) => {
+      const need = id ? accessoryHearts(id) : 0;
+      const locked = hearts < need;
+      const active = c.accessory === id;
+      return h('button', {
+        class: `journal-entry accessory${active ? ' active' : ''}${locked ? ' unknown' : ''}`, disabled: locked,
+        'aria-pressed': String(active), onclick: () => g.setAccessory(id),
+      },
+        pixelImg(corgiUrl(locked ? null : id), 48, locked ? 'silhouette' : ''),
+        h('strong', {}, id ? accessoryName(id) : t('companion.none')),
+        locked ? h('small', {}, t('companion.locked', { n: need })) : null,
+      );
+    };
+    return [
+      h('div', { class: 'companion-card' },
+        pixelImg(corgiUrl(c.accessory), 96),
+        h('div', { class: 'card-main' },
+          h('strong', { class: 'companion-name' }, c.name ?? t('companion.tab')),
+          h('div', { class: 'hearts', 'aria-label': `${hearts}/5` },
+            ...[1, 2, 3, 4, 5].map((i) => pixelImg(heartUrl, 21, i <= hearts ? '' : 'empty-heart', 18))),
+          h('small', {}, toNext ? t('companion.next', { n: toNext }) : t('companion.max')),
+          h('button', { class: 'btn small-btn', onclick: () => this.nameCompanion() }, t('companion.renameBtn')),
+        ),
+      ),
+      h('p', { class: 'muted small' }, t('companion.tips')),
+      h('p', { class: 'section-title' }, t('companion.accessories')),
+      h('div', { class: 'journal-grid' }, accessoryBtn(null), ...ACCESSORY_IDS.map((id) => accessoryBtn(id))),
+    ];
+  }
+
   // --- Petits éléments réutilisés ----------------------------------------------
 
   /** Pastille « icône + avoir/besoin » (verte quand c'est bon). */
@@ -391,6 +462,7 @@ export class Hud implements SceneHooks {
   // --- Courrier -------------------------------------------------------------
 
   openLetter(): void {
+    this.game.markLetterRead();
     this.openPanel('letter', () => {
       const g = this.game;
       const letter = g.state.letter;
@@ -443,6 +515,7 @@ export class Hud implements SceneHooks {
     this.openPanel('workshop', () => [
       this.header(t('workshop.title'), uiIconUrl('hammer')),
       this.bag(),
+      ...this.readyToPlace(),
       this.tabs(this.workshopTab, [['craft', t('workshop.tab.craft')], ['mine', t('workshop.tab.mine')]], (v) => (this.workshopTab = v)),
       ...(this.workshopTab === 'craft' ? this.workshopCraft() : this.workshopMine()),
     ]);
@@ -460,6 +533,19 @@ export class Hud implements SceneHooks {
     );
   }
 
+  /** Rappel des décos déjà fabriquées : un toucher pour les poser. */
+  private readyToPlace(): HTMLElement[] {
+    const inv = this.game.state.decor.inventory;
+    const owned = DECO_IDS.filter((id) => (inv[id] ?? 0) > 0);
+    if (!owned.length) return [];
+    return [h('div', { class: 'bag' },
+      h('p', { class: 'section-title' }, t('workshop.ready')),
+      h('div', { class: 'chips' }, ...owned.map((id) =>
+        h('button', { class: 'chip chip-btn', title: `${t('workshop.place')} : ${decoName(id)}`, onclick: () => this.startPlacing(id) },
+          pixelImg(decoIconUrl(id), 24, '', DECOS[id].tall ? 36 : 24), h('span', {}, `×${inv[id]}`)))),
+    )];
+  }
+
   private decoImg(id: DecoId, size = 48): HTMLImageElement {
     return pixelImg(decoIconUrl(id), size, '', DECOS[id].tall ? size * 1.5 : size);
   }
@@ -472,6 +558,8 @@ export class Hud implements SceneHooks {
     return [h('div', { class: 'card-list' }, ...order.map((id) => {
       const def = DECOS[id];
       const seasonLocked = def.recipe.season && def.recipe.season !== season;
+      const stock = g.state.decor.inventory[id] ?? 0;
+      const placed = g.state.decor.placed.filter((d) => d.id === id).length;
       return h('div', { class: `card craft-card${g.canCraft(id) ? ' ready' : ''}` },
         this.decoImg(id),
         h('div', { class: 'card-main' },
@@ -479,6 +567,7 @@ export class Hud implements SceneHooks {
           // Laisser découvrir : on décrit l'objet, jamais le visiteur qu'il attire.
           h('small', {}, t(`deco.hint.${id}`)),
           seasonLocked ? h('small', { class: 'muted' }, t('workshop.onlySeason', { season: seasonName(def.recipe.season!) })) : null,
+          stock || placed ? h('small', { class: 'stock' }, t('workshop.stock', { n: stock, p: placed })) : null,
           this.recipeChips(def.recipe),
         ),
         h('div', { class: 'card-actions' },
@@ -536,7 +625,9 @@ export class Hud implements SceneHooks {
     if (!edit.active) return;
     this.banner.replaceChildren(
       edit.hand ? pixelImg(decoIconUrl(edit.hand), 24, '', DECOS[edit.hand].tall ? 36 : 24) : pixelImg(uiIconUrl('hammer'), 24),
-      h('span', {}, edit.hand ? t('edit.place', { name: decoName(edit.hand) }) : t('edit.move')),
+      h('span', {}, edit.hand
+        ? t('edit.placeCount', { name: decoName(edit.hand), n: 1 + (this.game.state.decor.inventory[edit.hand] ?? 0) })
+        : t('edit.move')),
       h('button', { class: 'btn primary', onclick: () => this.finishEdit() }, t('edit.done')),
     );
   }

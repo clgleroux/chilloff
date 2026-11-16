@@ -11,14 +11,17 @@ import { growthStage, isRipe, isWet, timeUntilRipe } from '../game/growth';
 import type { Season } from '../game/seasons';
 import type { ForageItem, Game, GiftResult, PlacedDeco, VisitorInstance } from '../game/state';
 import { GARDEN_MAX_ROW, GARDEN_MIN_ROW, MAILBOX_TILE, TREE_POS, tileFoot } from '../game/world';
-import { cropName, formatDuration, giftLabel, t, visitorName } from '../i18n';
+import { accessoryName, cropName, formatDuration, giftLabel, materialName, t, visitorName } from '../i18n';
 import { edit } from '../ui/edit';
+import { Corgi } from './Corgi';
 
 export interface SceneHooks {
   toast(message: string): void;
   confirmTill(cost: number, onConfirm: () => void): void;
   openShop(tab: 'buy' | 'sell'): void;
   openLetter(): void;
+  /** Premier câlin : on choisit le nom du compagnon. */
+  nameCompanion(): void;
 }
 
 const WORLD_W = WORLD_COLS * TILE;
@@ -74,6 +77,7 @@ export class GardenScene extends Phaser.Scene {
   /** 0 le jour, 0,5 à l'aube et au crépuscule, 1 la nuit : intensité des lumières. */
   private lightLevel = 0;
   private wateredHintShown = false;
+  private corgi!: Corgi;
 
   constructor(private garden: Game, private hooks: SceneHooks) {
     super('garden');
@@ -86,6 +90,12 @@ export class GardenScene extends Phaser.Scene {
     this.buildGround();
     this.buildDecor();
     this.buildPlot();
+    this.corgi = new Corgi(this, this.garden, {
+      onTap: () => this.petCorgi(),
+      onDug: (item) => this.onDug(item),
+      dust: (x, y) => this.dirt(x, y),
+      zzz: (x, y) => this.zzz(x, y),
+    }, DEPTH_OBJECTS);
 
     this.editGrid = this.add.graphics().setDepth(DEPTH_EDIT_GRID);
     this.cursorImg = this.add.image(0, 0, 'fx_cursor').setOrigin(0, 0).setDepth(DEPTH_FX).setVisible(false);
@@ -109,6 +119,10 @@ export class GardenScene extends Phaser.Scene {
     edit.on(() => this.onEditChanged());
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.refresh() });
     this.time.addEvent({ delay: 30_000, loop: true, callback: () => this.updateTimeOfDay() });
+  }
+
+  update(_time: number, delta: number): void {
+    this.corgi.update(Math.min(delta, 100));
   }
 
   // --- Construction du décor ------------------------------------------------
@@ -136,12 +150,17 @@ export class GardenScene extends Phaser.Scene {
     // Boîte aux lettres à côté de la porte, avec une bulle quand une lettre attend.
     const mb = tileFoot(MAILBOX_TILE.col, MAILBOX_TILE.row);
     this.mailbox = this.add.image(mb.x, mb.y, 'mailbox_down').setOrigin(0.5, 1).setDepth(DEPTH_OBJECTS + mb.y);
-    this.mailbox.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+    const openMail = () => {
       if (edit.active) return;
       this.wiggle(this.mailbox);
       this.hooks.openLetter();
-    });
+    };
+    // Zone de toucher plus large que le dessin (qui est fin), pour ne jamais la rater.
+    this.mailbox.setInteractive({ hitArea: new Phaser.Geom.Rectangle(-4, 2, 24, 22), hitAreaCallback: Phaser.Geom.Rectangle.Contains, useHandCursor: true })
+      .on('pointerdown', openMail);
     this.letterBubble = this.add.image(mb.x, mb.y - 30, 'ui_letter').setDepth(DEPTH_FX - 2).setVisible(false);
+    this.letterBubble.setInteractive({ hitArea: new Phaser.Geom.Rectangle(-2, -2, 20, 20), hitAreaCallback: Phaser.Geom.Rectangle.Contains, useHandCursor: true })
+      .on('pointerdown', openMail);
     this.tweens.add({ targets: this.letterBubble, y: mb.y - 33, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
     // L'arbre du jardin : on peut le secouer.
@@ -249,7 +268,7 @@ export class GardenScene extends Phaser.Scene {
     this.sync(this.visitorViews, s.visitors, (v) => this.makeVisitor(v));
 
     this.mailbox.setTexture(s.letter ? 'mailbox_up' : 'mailbox_down');
-    this.letterBubble.setVisible(!!s.letter && !edit.active);
+    this.updateBubble();
     if (edit.active) this.drawEditGrid();
 
     const season = this.garden.season;
@@ -393,7 +412,15 @@ export class GardenScene extends Phaser.Scene {
       this.editGrid.clear();
       this.ghost.setVisible(false);
     }
-    this.letterBubble.setVisible(!!this.garden.state.letter && !edit.active);
+    this.updateBubble();
+  }
+
+  /** Bulle du courrier : une lettre pas encore lue, ou une lettre lue qu'on peut maintenant donner (coche verte). */
+  private updateBubble(): void {
+    const letter = this.garden.state.letter;
+    const ready = !!letter && this.garden.canDeliver();
+    this.letterBubble.setTexture(ready ? 'ui_letter_ready' : 'ui_letter');
+    this.letterBubble.setVisible(!!letter && (!letter.read || ready) && !edit.active);
   }
 
   private drawEditGrid(): void {
@@ -415,9 +442,11 @@ export class GardenScene extends Phaser.Scene {
     const g = this.garden;
     if (edit.hand) {
       if (g.canPlace(col, row)) {
-        g.placeDeco(edit.hand, col, row);
-        edit.setHand(null);
-        this.ghost.setVisible(false);
+        const id = edit.hand;
+        g.placeDeco(id, col, row);
+        // S'il en reste d'autres, on garde la même déco en main pour continuer à poser.
+        if (g.state.decor.inventory[id] && g.takeDeco(id)) edit.setHand(id);
+        else { edit.setHand(null); this.ghost.setVisible(false); }
       } else if (g.decoAt(col, row)) {
         this.hooks.toast(t('edit.occupied'));
       } else {
@@ -591,6 +620,46 @@ export class GardenScene extends Phaser.Scene {
         duration: 900 + Math.random() * 500, delay: k * 60, ease: 'Sine.easeIn', onComplete: () => leaf.destroy(),
       });
     }
+  }
+
+  // --- Compagnon --------------------------------------------------------------
+
+  private petCorgi(): void {
+    if (edit.active) return;
+    const g = this.garden;
+    const res = g.petCompanion();
+    const { x, y } = this.corgi.img;
+    for (let i = 0; i < (res.counted ? 3 : 1); i++) this.time.delayedCall(i * 140, () => this.heart(x + (i - 1) * 6, y - 14));
+    this.corgi.petted();
+    const name = g.state.companion.name;
+    if (!name) { this.hooks.nameCompanion(); return; }
+    if (this.corgi.sleeping) this.hooks.toast(t('companion.sleeping', { name }));
+    else if (res.unlocked) this.hooks.toast(t('companion.unlocked', { name, accessory: accessoryName(res.unlocked) }));
+    else if (res.dailyBonus) this.hooks.toast(t('companion.daily', { name }));
+    else if (res.counted) this.hooks.toast(t('companion.happy', { name }));
+  }
+
+  private onDug(item: ForageItem): void {
+    const foot = tileFoot(item.col, item.row);
+    const hole = this.add.image(foot.x, foot.y - 3, 'fx_hole').setDepth(DEPTH_SOIL + 0.4);
+    this.tweens.add({ targets: hole, alpha: 0, delay: 20_000, duration: 2000, onComplete: () => hole.destroy() });
+    const name = this.garden.state.companion.name;
+    if (name) this.hooks.toast(t('companion.dug', { name, material: materialName(item.id) }));
+  }
+
+  private dirt(x: number, y: number): void {
+    for (let k = 0; k < 3; k++) {
+      const d = this.add.rectangle(x, y, 1, 1, k % 2 ? 0x6e4228 : 0x8a5636).setDepth(DEPTH_FX);
+      this.tweens.add({
+        targets: d, x: x + (Math.random() * 10 - 5), y: y - 3 - Math.random() * 5, alpha: 0, duration: 380,
+        ease: 'Quad.easeOut', onComplete: () => d.destroy(),
+      });
+    }
+  }
+
+  private zzz(x: number, y: number): void {
+    const z = this.add.image(x, y, 'fx_zzz').setDepth(DEPTH_NIGHT + 2).setScale(0.6);
+    this.tweens.add({ targets: z, x: x + 5, y: y - 10, scale: 1, alpha: { from: 1, to: 0 }, duration: 1600, onComplete: () => z.destroy() });
   }
 
   private heart(x: number, y: number): void {

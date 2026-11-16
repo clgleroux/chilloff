@@ -36,6 +36,14 @@ const tapTile = (col, row) => tapWorld((col + 0.5) * 16, (row + 0.5) * 16);
 
 const step = (name) => console.log('✓', name);
 
+/** Le corgi se promène librement : pour le test, on le fait patienter sur le chemin, loin de tout. */
+const parkCorgi = () => page.evaluate(() => {
+  const c = window.chilloffScene.corgi;
+  c.path = []; c.arrive = null; c.mode = 'idle'; c.timer = 10 * 60_000;
+  c.img.setPosition(120, 74);
+});
+await parkCorgi();
+
 // 1. Planter une betterave
 let s = await save();
 assert.equal(s.coins, 20);
@@ -111,20 +119,32 @@ assert.ok(s.treeShakeAt > now, 'l’arbre a été secoué');
 assert.ok(s.forage.length === before + 1 || s.forage.length === 5);
 step('secouer l’arbre');
 
-// 9. Courrier : la première lettre de Mamie Rose, livrée contre un nichoir
+// 9. Courrier : la première lettre de Mamie Rose. Une fois lue, la bulle se cache…
+// (sac vidé : un écureuil généreux a pu offrir assez de brindilles pour répondre tout de suite)
+await page.evaluate(() => { window.chilloff.state.materials = {}; });
 await tapWorld(72, 52);
 assert.match(await page.locator('.panel-letter').innerText(), /Mamie Rose/);
 assert.equal(await page.locator('.panel-letter .btn.primary').isDisabled(), true);
 await page.locator('.close-btn').click();
 await page.waitForTimeout(250);
-await page.evaluate(() => { window.chilloff.state.materials.twig = 3; window.chilloff.save(); });
-await tapWorld(72, 52);
+s = await save();
+assert.equal(s.letter.read, true);
+assert.equal(await page.evaluate(() => window.chilloffScene.letterBubble.visible), false);
+step('lettre lue : la bulle se cache');
+
+// … et revient avec une coche quand on a de quoi répondre ; la bulle elle-même s'ouvre au toucher.
+await page.evaluate(() => { const g = window.chilloff; g.state.materials.twig = 3; g.selectSeed(g.state.selectedSeed); });
+await page.waitForTimeout(1200);
+assert.match(await page.locator('#toast-root').innerText(), /tout ce qu’il faut/);
+assert.equal(await page.evaluate(() => window.chilloffScene.letterBubble.visible), true);
+assert.equal(await page.evaluate(() => window.chilloffScene.letterBubble.texture.key), 'ui_letter_ready');
+await tapWorld(72, 34);
 await page.locator('.panel-letter .btn.primary').click();
 await page.waitForTimeout(250);
 s = await save();
 assert.equal(s.decor.inventory.birdhouse, 1);
 assert.equal(s.letter, null);
-step('courrier');
+step('courrier : bulle cliquable, lettre donnée');
 
 // 10. Atelier : poser le nichoir dans l'herbe
 await page.locator('.workshop-btn').click();
@@ -141,15 +161,60 @@ assert.deepEqual(s.decor.placed.map((d) => [d.id, d.col, d.row]), [['birdhouse',
 assert.equal(await page.locator('#edit-banner').isVisible(), false);
 step('poser une déco');
 
-// 11. Recharger : tout est conservé
+// 11. Pose en série : 3 pas japonais d'affilée, sans repasser par l'atelier
+await page.evaluate(() => {
+  const g = window.chilloff;
+  for (let i = 0; i < 3; i++) g.returnDeco('stepstone');
+  const busy = (c, r) => c === 0 && r >= 8 && r <= 10;
+  g.state.forage = g.state.forage.filter((f) => !busy(f.col, f.row));
+  g.state.visitors = g.state.visitors.filter((v) => !busy(v.col, v.row));
+});
+await page.locator('.workshop-btn').click();
+await page.waitForTimeout(250);
+assert.match(await page.locator('.panel-workshop').innerText(), /Prêtes à poser/i);
+await page.locator('.panel-workshop .chip-btn').first().click();
+await page.waitForTimeout(250);
+assert.match(await page.locator('#edit-banner').innerText(), /×3/);
+await tapTile(0, 8);
+assert.match(await page.locator('#edit-banner').innerText(), /×2/);
+await tapTile(0, 9);
+await tapTile(0, 10);
+assert.match(await page.locator('#edit-banner').innerText(), /déplacer/);
+await page.locator('#edit-banner .btn').click();
+await page.waitForTimeout(250);
+s = await save();
+assert.equal(s.decor.placed.filter((d) => d.id === 'stepstone').length, 3);
+assert.equal(s.decor.inventory.stepstone, undefined);
+step('pose en série');
+
+// 12. Le compagnon : un câlin, et on lui donne un nom
+await parkCorgi();
+await tapWorld(120, 68);
+await page.locator('.name-input').fill('Biscotte');
+await page.locator('.panel-name .btn.primary').click();
+await page.waitForTimeout(250);
+s = await save();
+assert.equal(s.companion.name, 'Biscotte');
+assert.equal(s.companion.friendship, 2);
+assert.match(await page.locator('#toast-root').innerText(), /Bienvenue, Biscotte/);
+await page.locator('.icon-btn[aria-label="Journal"]').click();
+await page.getByRole('tab', { name: 'Biscotte' }).click();
+assert.match(await page.locator('.companion-card').innerText(), /Biscotte/);
+await page.locator('.close-btn').click();
+await page.waitForTimeout(250);
+step('compagnon : câlin et nom');
+
+// 13. Recharger : tout est conservé
 const coinsBefore = s.coins;
 await page.reload();
 await page.waitForTimeout(1200);
+await parkCorgi();
 assert.equal((await page.locator('.coin-count').innerText()).trim(), String(coinsBefore));
-assert.equal((await save()).decor.placed.length, 1);
+assert.equal((await save()).decor.placed.length, 4);
+assert.equal((await save()).companion.name, 'Biscotte');
 step('sauvegarde après rechargement');
 
-// 12. Passer en anglais
+// 14. Passer en anglais
 await page.locator('.icon-btn').nth(1).click();
 await page.getByRole('button', { name: 'English' }).click();
 await page.waitForTimeout(200);

@@ -35,7 +35,8 @@ export function isPlotTile(col: number, row: number): boolean {
 export function isStaticBlocked(col: number, row: number): boolean {
   if (col < 0 || col >= WORLD_COLS || row < GARDEN_MIN_ROW || row > GARDEN_MAX_ROW) return true;
   if (col >= 1 && col <= 3 && row >= 1 && row <= 3) return true; // cabane
-  if (col === MAILBOX_TILE.col && row === MAILBOX_TILE.row) return true;
+  // La boîte aux lettres, et la case au-dessus où flotte la bulle du courrier (gardée libre pour bien la toucher).
+  if (col === MAILBOX_TILE.col && (row === MAILBOX_TILE.row || row === MAILBOX_TILE.row - 1)) return true;
   if ((col === 9 || col === 10) && row >= 1 && row <= 3) return true; // arbre
   if (row === PATH_ROW && col >= PATH_COLS[0] && col <= PATH_COLS[1]) return true;
   if (BUSH_TILES.some(([c, r]) => c === col && r === row)) return true;

@@ -6,6 +6,10 @@ import {
   VISITOR_GIFT_CHANCE, VISITOR_INTERVAL, VISITOR_MAX, VISITOR_STAY,
   WELCOME_BACK_AFTER, WET_DURATION, tillCost,
 } from './config';
+import {
+  ACCESSORY_IDS, DAILY_PET_BONUS, DIG_EXTRA_FORAGE, DIG_INTERVAL, NAME_MAX_LENGTH, PET_COOLDOWN,
+  accessoryHearts, heartsFor, isAccessoryId, type AccessoryId,
+} from './companion';
 import { CROPS, CROP_IDS, cropsForSeason, isCropId, type CropId } from './crops';
 import { DECOS, isDecoId, type DecoId, type Recipe } from './decor';
 import { advancePlant, isRipe, type PlantState, type PlotTile } from './growth';
@@ -51,6 +55,18 @@ export interface VisitorInstance {
   leavesAt: number;
 }
 
+export interface CompanionState {
+  /** null tant qu'on ne l'a pas encore nommé (au premier câlin). */
+  name: string | null;
+  friendship: number;
+  /** Dernier câlin compté pour l'amitié. */
+  lastPetAt: number;
+  /** Jour (AAAA-MM-JJ) du dernier câlin, pour le bonus du premier câlin du jour. */
+  lastPetDay: string;
+  accessory: AccessoryId | null;
+  nextDigAt: number;
+}
+
 export interface GameState {
   version: 2;
   createdAt: number;
@@ -72,6 +88,7 @@ export interface GameState {
   lettersDone: number;
   treeShakeAt: number;
   nextUid: number;
+  companion: CompanionState;
   journal: {
     crops: Partial<Record<CropId, JournalEntry>>;
     visitors: Partial<Record<VisitorId, JournalEntry>>;
@@ -104,6 +121,7 @@ export type GameEvent =
   | { type: 'seasonChanged'; from: Season; to: Season }
   | { type: 'ripened'; index: number; crop: CropId }
   | { type: 'letterArrived' }
+  | { type: 'letterReady' }
   | { type: 'newDay' };
 
 export interface LoadReport {
@@ -118,6 +136,10 @@ const CORRUPT_KEY = 'chilloff.save.corrupt';
 
 export function plotIndex(col: number, row: number): number {
   return row * PLOT_COLS + col;
+}
+
+function newCompanion(now: number): CompanionState {
+  return { name: null, friendship: 0, lastPetAt: 0, lastPetDay: '', accessory: null, nextDigAt: now + DIG_INTERVAL[0] };
 }
 
 export function createNewGame(now: number): GameState {
@@ -152,6 +174,7 @@ export function createNewGame(now: number): GameState {
     lettersDone: 0,
     treeShakeAt: 0,
     nextUid: 1,
+    companion: newCompanion(now),
     journal: {
       crops: {}, visitors: {}, totalHarvests: 0, coinsEarned: 0, daysPlayed: 1,
       lastDay: dayKey(new Date(now)), forageCount: 0, lettersDelivered: 0,
@@ -191,6 +214,21 @@ function journalEntries<K extends string>(v: unknown, isKey: (k: unknown) => k i
 
 function arr(v: unknown): any[] {
   return Array.isArray(v) ? v : [];
+}
+
+function parseCompanion(c: any, now: number): CompanionState {
+  const base = newCompanion(now);
+  if (!c || typeof c !== 'object') return base;
+  const friendship = Math.max(0, Math.floor(num(c.friendship, 0)));
+  const accessory = isAccessoryId(c.accessory) && heartsFor(friendship) >= accessoryHearts(c.accessory) ? c.accessory : null;
+  return {
+    name: typeof c.name === 'string' && c.name.trim() ? c.name.trim().slice(0, NAME_MAX_LENGTH) : null,
+    friendship,
+    lastPetAt: num(c.lastPetAt, 0),
+    lastPetDay: typeof c.lastPetDay === 'string' ? c.lastPetDay : '',
+    accessory,
+    nextDigAt: num(c.nextDigAt, base.nextDigAt),
+  };
 }
 
 export function parseSave(raw: string, now: number): GameState | null {
@@ -256,7 +294,7 @@ export function parseSave(raw: string, now: number): GameState | null {
       ((w.kind === 'crop' && isCropId(w.id)) || (w.kind === 'material' && isMaterialId(w.id))));
     if (wants.length) {
       letter = {
-        id: num(l.id, 0), from: l.from, text: l.text, wants, arrivedAt: num(l.arrivedAt, now),
+        id: num(l.id, 0), from: l.from, text: l.text, wants, arrivedAt: num(l.arrivedAt, now), read: !!l.read,
         reward: {
           coins: Math.max(0, Math.floor(num(l.reward?.coins, 0))),
           deco: isDecoId(l.reward?.deco) ? l.reward.deco : undefined,
@@ -288,6 +326,7 @@ export function parseSave(raw: string, now: number): GameState | null {
     lettersDone: Math.max(0, Math.floor(num(data.lettersDone, 0))),
     treeShakeAt: num(data.treeShakeAt, 0),
     nextUid: uid,
+    companion: parseCompanion(data.companion, now),
     journal: {
       crops: journalEntries(j.crops, isCropId, now),
       visitors: journalEntries(j.visitors, isVisitorId, now),
@@ -311,6 +350,7 @@ export class Game {
   private changeListeners = new Set<(s: GameState) => void>();
   private eventListeners = new Set<(e: GameEvent) => void>();
   private ripeKnown: boolean[];
+  private letterWasReady = false;
 
   constructor(
     state: GameState,
@@ -320,6 +360,7 @@ export class Game {
   ) {
     this.state = state;
     this.ripeKnown = state.plots.map((t) => !!t.plant && isRipe(t.plant));
+    this.letterWasReady = this.canDeliver();
   }
 
   /** Charge la partie (ou en crée une) et calcule ce qui s'est passé pendant l'absence. */
@@ -854,6 +895,78 @@ export class Game {
     this.commit();
   }
 
+  markLetterRead(): void {
+    const letter = this.state.letter;
+    if (!letter || letter.read) return;
+    letter.read = true;
+    this.letterWasReady = this.canDeliver();
+    this.commit();
+  }
+
+  // --- Compagnon --------------------------------------------------------------
+
+  get companionHearts(): number {
+    return heartsFor(this.state.companion.friendship);
+  }
+
+  /** Un câlin : compte pour l'amitié au plus toutes les 3 min ; le premier du jour compte double. */
+  petCompanion(): { counted: boolean; dailyBonus: boolean; hearts: number; unlocked: AccessoryId | null } {
+    const c = this.state.companion;
+    const now = this.now();
+    const heartsBefore = heartsFor(c.friendship);
+    const today = dayKey(new Date(now));
+    const dailyBonus = c.lastPetDay !== today;
+    const counted = dailyBonus || now >= c.lastPetAt + PET_COOLDOWN;
+    if (counted) {
+      c.friendship += dailyBonus ? DAILY_PET_BONUS : 1;
+      c.lastPetAt = now;
+      c.lastPetDay = today;
+      this.commit();
+    }
+    const hearts = heartsFor(c.friendship);
+    const unlocked = hearts > heartsBefore ? ACCESSORY_IDS[hearts - 1] : null;
+    return { counted, dailyBonus: counted && dailyBonus, hearts, unlocked };
+  }
+
+  nameCompanion(name: string): string {
+    const clean = name.replace(/\s+/g, ' ').trim().slice(0, NAME_MAX_LENGTH);
+    if (!clean) return this.state.companion.name ?? '';
+    this.state.companion.name = clean;
+    this.commit();
+    return clean;
+  }
+
+  setAccessory(id: AccessoryId | null): boolean {
+    if (id && this.companionHearts < accessoryHearts(id)) return false;
+    this.state.companion.accessory = id;
+    this.commit();
+    return true;
+  }
+
+  /** Le corgi a-t-il envie de creuser ? (le jour, pas trop souvent, pas si l'herbe déborde déjà de trouvailles) */
+  canDig(): boolean {
+    const now = this.now();
+    return !isNight(new Date(now)) && now >= this.state.companion.nextDigAt
+      && this.state.forage.length < FORAGE_MAX + DIG_EXTRA_FORAGE;
+  }
+
+  /** Le corgi a fini de creuser sur cette case : une trouvaille apparaît. */
+  companionDig(col: number, row: number): ForageItem | null {
+    if (!this.canDig()) return null;
+    const c = this.state.companion;
+    if (!this.isTileFree(col, row)) {
+      c.nextDigAt = this.now() + 30_000; // il réessaiera un peu plus loin
+      return null;
+    }
+    const id = this.pickWeighted(forageTable(this.season));
+    if (!id) return null;
+    const item: ForageItem = { uid: this.state.nextUid++, id, col, row };
+    this.state.forage.push(item);
+    c.nextDigAt = this.now() + this.between(DIG_INTERVAL);
+    this.commit();
+    return item;
+  }
+
   // --- Divers -----------------------------------------------------------------
 
   setLang(lang: Lang): void {
@@ -878,6 +991,13 @@ export class Game {
   private commit(): void {
     this.save();
     for (const fn of this.changeListeners) fn(this.state);
+    // Une lettre déjà lue devient faisable : on prévient (une seule fois).
+    const ready = this.canDeliver();
+    if (ready && !this.letterWasReady && this.state.letter?.read) {
+      this.letterWasReady = ready;
+      this.emitEvent({ type: 'letterReady' });
+    }
+    this.letterWasReady = ready;
   }
 
   private emitEvent(e: GameEvent): void {

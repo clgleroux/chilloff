@@ -157,3 +157,72 @@ describe('jardin vivant', () => {
     expect(game.state.letter).not.toBeNull();
   });
 });
+
+describe('courrier lu', () => {
+  it('une lettre lue reste dans la boîte, et prévient quand on a de quoi répondre', () => {
+    const { game } = newGame();
+    const events: string[] = [];
+    game.onEvent((e) => events.push(e.type));
+    expect(game.state.letter?.read).toBe(false);
+    game.markLetterRead();
+    expect(game.state.letter?.read).toBe(true);
+    game.state.forage = [{ uid: 9001, id: 'twig', col: 0, row: 6 }, { uid: 9002, id: 'twig', col: 0, row: 7 }, { uid: 9003, id: 'twig', col: 0, row: 8 }];
+    game.collect(9001);
+    game.collect(9002);
+    expect(events).not.toContain('letterReady');
+    game.collect(9003);
+    expect(events.filter((e) => e === 'letterReady')).toHaveLength(1);
+  });
+
+  it('la case au-dessus de la boîte aux lettres reste libre', () => {
+    expect(isStaticBlocked(4, 2)).toBe(true);
+  });
+});
+
+describe('compagnon', () => {
+  it('se nomme au premier câlin, nom nettoyé et raccourci', () => {
+    const { game } = newGame();
+    expect(game.state.companion.name).toBeNull();
+    expect(game.nameCompanion('   ')).toBe('');
+    expect(game.nameCompanion('  Mini   Biscotte  ')).toBe('Mini Biscotte');
+    expect(game.nameCompanion('Un nom vraiment beaucoup trop long')).toHaveLength(16);
+  });
+
+  it('les câlins comptent toutes les 3 min, le premier du jour double', () => {
+    const { game, advance } = newGame();
+    expect(game.petCompanion()).toMatchObject({ counted: true, dailyBonus: true });
+    expect(game.state.companion.friendship).toBe(2);
+    expect(game.petCompanion().counted).toBe(false); // juste des cœurs
+    advance(3 * MINUTE);
+    expect(game.petCompanion()).toMatchObject({ counted: true, dailyBonus: false, hearts: 1, unlocked: 'bandana' });
+  });
+
+  it('les accessoires se débloquent avec les cœurs', () => {
+    const { game } = newGame();
+    expect(game.setAccessory('strawhat')).toBe(false);
+    game.state.companion.friendship = 15;
+    expect(game.companionHearts).toBe(3);
+    expect(game.setAccessory('strawhat')).toBe(true);
+    expect(game.setAccessory('scarf')).toBe(false);
+    expect(game.state.companion.accessory).toBe('strawhat');
+  });
+
+  it('creuse de temps en temps le jour et déterre une trouvaille', () => {
+    const { game, advance } = newGame();
+    expect(game.canDig()).toBe(false);
+    advance(6 * MINUTE);
+    game.state.forage = [];
+    expect(game.canDig()).toBe(true);
+    expect(game.companionDig(4, 3)).toBeNull(); // la boîte aux lettres : il réessaiera ailleurs
+    advance(MINUTE);
+    const item = game.companionDig(0, 6);
+    expect(item && [item.col, item.row]).toEqual([0, 6]);
+    expect(game.canDig()).toBe(false);
+  });
+
+  it('ne creuse pas la nuit', () => {
+    const { game, advance } = newGame(AUTUMN_NIGHT);
+    advance(20 * MINUTE);
+    expect(game.canDig()).toBe(false);
+  });
+});

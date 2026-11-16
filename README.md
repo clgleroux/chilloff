@@ -25,6 +25,13 @@ Jouable sur mobile et sur ordinateur, installable comme une appli (PWA).
 - **Atelier** : 11 décos à fabriquer (nichoir, banc, lanterne, mare, bonhomme de neige…) et à poser librement dans l'herbe.
 - **La déco attire des visiteurs** : la mésange se pose sur le nichoir, le chat fait la sieste près du banc, les lucioles brillent autour des lanternes les nuits d'été… 11 visiteurs à découvrir au fil des saisons. Le jeu ne le dit nulle part : le journal ne montre que des silhouettes, et une petite note n'apparaît qu'après la rencontre.
 
+### Le compagnon
+
+Un petit corgi s'installe dans le jardin (tu lui donnes son nom au premier câlin). Il trottine en contournant le potager,
+renifle l'herbe, fait la sieste, **creuse de temps en temps pour déterrer une trouvaille**, et dort devant la porte la nuit.
+Un toucher = un câlin : l'amitié monte (un câlin compte toutes les 3 min, le premier du jour compte double) et chacun des
+5 cœurs débloque un accessoire (bandana, nœud, chapeau de paille, couronne de fleurs, écharpe), à choisir dans le journal.
+
 Une seule action par toucher : sur une case en friche → la défricher, sur la terre → planter la graine choisie,
 sur une plante → l'arroser, sur une plante mûre (qui scintille) → récolter. Trouvailles, visiteurs, boîte aux lettres et arbre se touchent aussi.
 
@@ -72,6 +79,7 @@ src/
     decor.ts     décorations et leurs recettes
     visitors.ts  visiteurs (saison, heure, déco qui les attire, cadeau)
     letters.ts   courrier des voisins
+    companion.ts le corgi : amitié, accessoires, fouilles
     world.ts     plan du jardin : où l'on peut poser, cueillir, recevoir des visiteurs
     state.ts     état de la partie, actions du joueur, vie du jardin, sauvegarde
   art/         pixel art généré par code (aucune image à télécharger)
@@ -80,6 +88,7 @@ src/
     draw.ts      décors procéduraux : herbe, terre, cabane, arbres… par saison
     textures.ts  enregistrement des textures pour Phaser et l'interface
   scenes/      GardenScene : le jardin, les interactions, les petits effets
+               Corgi.ts / route.ts : promenade du compagnon (trajets qui contournent le potager)
   ui/          interface HTML : barres, boutique, atelier, courrier, journal, options, mode déco
   i18n/        traductions FR / EN
 scripts/
@@ -104,6 +113,6 @@ depuis la console (`chilloff.state`).
 - [x] **Petits visiteurs** attirés par la déco, selon la saison et l'heure
 - [x] **Courrier** des voisins, cueillette, arbre à secouer
 - [ ] **Croisements** : deux plantes voisines peuvent donner une variété rare
-- [ ] **Un compagnon** (chat, poule…) avec quelques accessoires
+- [x] **Un compagnon** (corgi) avec 5 accessoires débloqués par l'amitié
 - [ ] **Jalons du journal** qui débloquent de la déco
 - [ ] Objectif du jour, musique douce, déco de saison

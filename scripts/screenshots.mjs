@@ -45,6 +45,7 @@ function demoSave(now, season) {
     decor: { placed, inventory: { pond: 1, lantern: 1 } },
     materials: { twig: 5, pebble: 3, [seasonMat]: 2 },
     lettersDone: 3,
+    companion: { name: 'Biscotte', friendship: 16, lastPetAt: 0, lastPetDay: '', accessory: 'bandana', nextDigAt: now + 3600000 },
     version: 1, createdAt: now - 3 * 86400000, updatedAt: now, coins: 137, plots,
     seeds: { [crops[0]]: 4, [crops[1]]: 2, [crops[2]]: 1 }, basket: { [crops[0]]: 3, [crops[1]]: 1 },
     selectedSeed: crops[1], lastSeason: season,
@@ -109,6 +110,25 @@ await shot(browser, 'mobile-journal-visitors', {
 await shot(browser, 'mobile-edit', {
   width: 390, height: 844, date: autumnDay, season: 'autumn',
   action: async (p) => { await p.click('.workshop-btn'); await p.click('.panel-workshop .btn.primary'); await p.waitForTimeout(400); },
+});
+await shot(browser, 'mobile-name', {
+  width: 390, height: 844, date: autumnDay, fresh: true, path: '?debug',
+  action: async (p) => {
+    await p.evaluate(() => { const c = window.chilloffScene.corgi; c.path = []; c.mode = 'idle'; c.timer = 600000; c.img.setPosition(120, 74); });
+    await tapWorld(p, 120, 68);
+    await p.locator('.name-input').fill('Biscotte');
+  },
+});
+await shot(browser, 'mobile-companion', {
+  width: 390, height: 844, date: autumnDay, season: 'autumn',
+  action: async (p) => { await p.click('.icon-btn[aria-label="Journal"]'); await p.click('.panel-journal .tab:nth-child(3)'); await p.waitForTimeout(400); },
+});
+await shot(browser, 'mobile-garden-corgi', {
+  width: 390, height: 844, date: new Date(2026, 10, 16, 18, 30), season: 'autumn', path: '?debug',
+  action: async (p) => {
+    await p.evaluate(() => { const c = window.chilloffScene.corgi; c.path = []; c.mode = 'idle'; c.timer = 600000; c.img.setPosition(136, 74); });
+    await p.waitForTimeout(300);
+  },
 });
 await shot(browser, 'desktop-summer-night', { width: 1440, height: 900, scale: 1, date: new Date(2027, 6, 10, 23, 30), season: 'summer' });
 

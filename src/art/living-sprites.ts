@@ -610,3 +610,89 @@ export const HEART: PixelSprite = {
 export const LEAF_BITS: Record<string, string> = {
   spring: '#9be06a', summer: '#5aa34a', autumn: '#f07a1a', winter: '#ffffff',
 };
+
+// ---------------------------------------------------------------------------
+// Le compagnon : un corgi (dessiné tourné vers la gauche, retourné par la scène).
+
+export type CorgiFrame = 'walkA' | 'walkB' | 'sleep';
+
+export const CORGI_PALETTE: Record<string, string> = {
+  k: K, o: '#e8892a', O: '#c4602a', c: '#fff1dc', C: '#e8d4b8', p: '#f0a0b0',
+};
+
+const CORGI_TOP = [
+  E, E,
+  '..k...k.........',
+  '.kpk.kpk........',
+  '.koookook.......',
+  'koooooooOk......',
+  'kokoooooOkkkkkk.',
+  'kcccooooOoooooOk',
+  'kccccoooooooooOk',
+  '.kcccccooooooOOk',
+  '..kccccccccccOk.',
+  '...kkccccccckk..',
+];
+
+export const CORGI_FRAMES: Record<CorgiFrame, string[]> = {
+  walkA: [...CORGI_TOP, '...kOk...kOk....', '...kkk...kkk....', E, E],
+  walkB: [...CORGI_TOP, '....kOk.kOk.....', '....kkk.kkk.....', E, E],
+  sleep: [
+    E, E, E, E, E, E, E,
+    '..k...k.........',
+    '.kpk.kpk........',
+    '.koookookkkkkk..',
+    'kooooooooooooOOk',
+    'kokkoooooooooOOk',
+    'kccccooooooooOOk',
+    '.kccccccccccccCk',
+    '..kkkkkkkkkkkkk.',
+    E,
+  ],
+};
+
+export interface AccessorySprite extends PixelSprite {
+  /** Coin haut-gauche de l'accessoire dans le dessin du corgi, debout et couché. */
+  anchor: { walk: [number, number]; sleep: [number, number] };
+}
+
+export const ACCESSORY_SPRITES: Record<'bandana' | 'bow' | 'strawhat' | 'flowercrown' | 'scarf', AccessorySprite> = {
+  bandana: {
+    palette: { r: '#e0443a', R: '#a82a2a' },
+    rows: ['rrrrrr', '.rRrr.', '..rr..'],
+    anchor: { walk: [5, 9], sleep: [5, 12] },
+  },
+  bow: {
+    palette: { p: '#ff8ab4', P: '#e0507a', k: K },
+    rows: ['pP.Pp', 'PPkPP', 'pP.Pp'],
+    anchor: { walk: [2, 3], sleep: [2, 8] },
+  },
+  strawhat: {
+    palette: { y: '#f0d27a', Y: '#d8b050', r: '#c4503a', k: K },
+    rows: ['..kkkkk..', '.kyYYYyk.', 'kkrrrrrkk', 'yyyyyyyyy'],
+    anchor: { walk: [0, 1], sleep: [0, 6] },
+  },
+  flowercrown: {
+    palette: { p: '#ff8ab4', w: '#ffffff', y: '#ffe27a', g: '#5bb44a' },
+    rows: ['p.w.y.p', 'gpgwgyg'],
+    anchor: { walk: [1, 3], sleep: [1, 8] },
+  },
+  scarf: {
+    palette: { b: '#5a8ac4', B: '#3f6a9e', w: '#ffffff' },
+    rows: ['bwbwbwb', 'BbwbwbB', '..bw...', '..wb...'],
+    anchor: { walk: [4, 8], sleep: [4, 11] },
+  },
+};
+
+export const ZZZ: PixelSprite = { palette: { z: '#d8f0ff' }, rows: ['zzzz', '..z.', '.z..', 'zzzz'] };
+
+export const HOLE: PixelSprite = {
+  palette: { d: '#6e4228', D: '#3e2418' },
+  rows: ['.dddddddd.', 'dDDDDDDDDd', 'dDDDDDDDDd', '.dddddddd.'],
+};
+
+/** Petite coche verte : la lettre peut être donnée. */
+export const CHECK_BADGE: PixelSprite = {
+  palette: { k: K, g: '#5aa34a', w: '#ffffff' },
+  rows: ['.kkkk.', 'kggggk', 'kgggwk', 'kwgwgk', 'kgwggk', '.kkkk.'],
+};

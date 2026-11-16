@@ -4,12 +4,28 @@ import type Phaser from 'phaser';
 import { CROPS, CROP_IDS, type CropId } from '../game/crops';
 import { SEASONS } from '../game/seasons';
 import * as draw from './draw';
-import { DECO_SPRITES, EXTRA_UI_ICONS, HEART, MAILBOX_SPRITES, MATERIAL_SPRITES, VISITOR_SPRITES, type PixelSprite } from './living-sprites';
+import { ACCESSORY_IDS, type AccessoryId } from '../game/companion';
+import {
+  ACCESSORY_SPRITES, CHECK_BADGE, CORGI_FRAMES, CORGI_PALETTE, DECO_SPRITES, EXTRA_UI_ICONS, HEART, HOLE,
+  MAILBOX_SPRITES, MATERIAL_SPRITES, VISITOR_SPRITES, ZZZ, type CorgiFrame, type PixelSprite,
+} from './living-sprites';
 import { UI_ICONS } from './sprites';
 
 function sprite(s: PixelSprite): HTMLCanvasElement {
   const p = new draw.Painter(s.rows[0].length, s.rows.length);
   p.strings(s.rows, s.palette);
+  return p.canvas;
+}
+
+/** Le corgi, avec ou sans accessoire. Clé : corgi_<accessoire|none>_<pose>. */
+function corgi(frame: CorgiFrame, accessory: AccessoryId | null): HTMLCanvasElement {
+  const p = new draw.Painter(16, 16);
+  p.strings(CORGI_FRAMES[frame], CORGI_PALETTE);
+  if (accessory) {
+    const a = ACCESSORY_SPRITES[accessory];
+    const [x, y] = frame === 'sleep' ? a.anchor.sleep : a.anchor.walk;
+    p.strings(a.rows, a.palette, x, y);
+  }
   return p.canvas;
 }
 
@@ -75,6 +91,15 @@ function buildAll(): CanvasMap {
   for (const [id, sp] of Object.entries(VISITOR_SPRITES)) m.set(`vis_${id}`, sprite(sp));
   for (const [id, sp] of Object.entries(MAILBOX_SPRITES)) m.set(`mailbox_${id}`, sprite(sp));
   for (const [id, sp] of Object.entries(EXTRA_UI_ICONS)) m.set(`ui_${id}`, sprite(sp));
+  for (const acc of [null, ...ACCESSORY_IDS]) {
+    for (const frame of Object.keys(CORGI_FRAMES) as CorgiFrame[]) m.set(`corgi_${acc ?? 'none'}_${frame}`, corgi(frame, acc));
+  }
+  const ready = new draw.Painter(16, 16);
+  ready.strings(EXTRA_UI_ICONS.letter.rows, EXTRA_UI_ICONS.letter.palette);
+  ready.strings(CHECK_BADGE.rows, CHECK_BADGE.palette, 10, 0);
+  m.set('ui_letter_ready', ready.canvas);
+  m.set('fx_zzz', sprite(ZZZ));
+  m.set('fx_hole', sprite(HOLE));
   m.set('fx_heart', sprite(HEART));
   m.set('fx_glow', glow());
   m.set('fx_shadow', shadow());
@@ -111,3 +136,4 @@ export const uiIconUrl = (name: keyof typeof UI_ICONS | keyof typeof EXTRA_UI_IC
 export const materialIconUrl = (id: string) => textureUrl(`mat_${id}`);
 export const decoIconUrl = (id: string) => textureUrl(`deco_${id}`);
 export const visitorIconUrl = (id: string) => textureUrl(`vis_${id}`);
+export const corgiUrl = (accessory: AccessoryId | null, frame: CorgiFrame = 'walkA') => textureUrl(`corgi_${accessory ?? 'none'}_${frame}`);

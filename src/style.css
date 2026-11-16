@@ -242,7 +242,7 @@ img.px { image-rendering: pixelated; image-rendering: crisp-edges; flex-shrink: 
 }
 .overlay.open { background: rgba(43, 34, 51, 0.55); }
 /* Un panneau qui se ferme ne bloque plus les touchers. */
-.overlay:not(.open) { pointer-events: none; }
+.overlay.closing { pointer-events: none; }
 
 .panel {
   width: 100%;
@@ -499,6 +499,50 @@ img.silhouette { filter: brightness(0); opacity: 0.18; }
   .shop-btn { min-width: 64px; padding: 4px 4px; font-size: 12px; }
   .seed { min-width: 60px; }
 }
+
+/* --- Compagnon et rappels ------------------------------------------------------ */
+
+.chip-btn { cursor: pointer; font: inherit; font-size: 13px; font-weight: 800; }
+.chip-btn:active { transform: translateY(1px); }
+.stock { color: var(--wood) !important; font-weight: 700; }
+
+.name-panel { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+.name-panel h2 { margin: 4px 0 0; }
+.name-panel p { margin: 0; }
+.name-input {
+  width: min(280px, 100%);
+  margin-top: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--ink);
+  background: var(--paper-light);
+  border: 2px solid var(--wood-dark);
+  border-radius: var(--radius);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.name-input:focus { outline: 3px solid var(--gold); outline-offset: 1px; }
+.name-panel .dialog-actions { justify-content: center; }
+
+.companion-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px;
+  background: var(--paper-light);
+  border: 2px solid var(--paper-dark);
+  border-radius: var(--radius);
+}
+.companion-card .card-main { gap: 4px; align-items: flex-start; }
+.companion-name { font-size: 20px; }
+.hearts { display: flex; gap: 3px; }
+img.empty-heart { filter: grayscale(1) brightness(1.6); opacity: 0.45; }
+.journal-entry.accessory { font: inherit; color: inherit; cursor: pointer; }
+.journal-entry.accessory.active { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); background: #fff8dc; }
+.journal-entry.accessory:disabled { cursor: default; opacity: 1; }
 
 /* --- Planche de sprites (?atlas) ------------------------------------------------ */
 

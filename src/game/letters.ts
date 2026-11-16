@@ -24,6 +24,8 @@ export interface Letter {
   wants: Want[];
   reward: LetterReward;
   arrivedAt: number;
+  /** Lue : la bulle au-dessus de la boîte se cache jusqu'à ce qu'on ait de quoi répondre. */
+  read: boolean;
 }
 
 const GIFT_DECOS: DecoId[] = ['stepstone', 'flowerbed', 'lantern', 'bench'];
@@ -49,15 +51,15 @@ export function makeLetter(index: number, season: Season, random: () => number, 
   const special = SEASONAL_MATERIAL[season];
 
   if (index === 0) {
-    return { id: index, from: 'rose', text: 'letter.intro.0', arrivedAt: now,
+    return { id: index, from: 'rose', text: 'letter.intro.0', arrivedAt: now, read: false,
       wants: [{ kind: 'material', id: 'twig', n: 3 }], reward: { coins: 10, deco: 'birdhouse' } };
   }
   if (index === 1) {
-    return { id: index, from: 'capucine', text: 'letter.intro.1', arrivedAt: now,
+    return { id: index, from: 'capucine', text: 'letter.intro.1', arrivedAt: now, read: false,
       wants: [{ kind: 'crop', id: seasonal[0].id, n: 2 }], reward: { coins: 20, materials: { pebble: 2 } } };
   }
   if (index === 2) {
-    return { id: index, from: 'leon', text: 'letter.intro.2', arrivedAt: now,
+    return { id: index, from: 'leon', text: 'letter.intro.2', arrivedAt: now, read: false,
       wants: [{ kind: 'material', id: 'pebble', n: 2 }, { kind: 'material', id: special, n: 1 }],
       reward: { coins: 15, deco: 'flowerbed' } };
   }
@@ -81,5 +83,5 @@ export function makeLetter(index: number, season: Season, random: () => number, 
   const reward: LetterReward = { coins: Math.round(value * 1.5) + 5 };
   if (random() < 0.2) reward.deco = pick(GIFT_DECOS, random);
   const from = pick(CHARACTERS, random);
-  return { id: index, from, text: `letter.${from}.${index % 3}`, wants, reward, arrivedAt: now };
+  return { id: index, from, text: `letter.${from}.${index % 3}`, wants, reward, arrivedAt: now, read: false };
 }
