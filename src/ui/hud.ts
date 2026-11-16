@@ -7,7 +7,7 @@ import type { Want } from '../game/letters';
 import { MATERIAL_IDS, type MaterialId } from '../game/materials';
 import { SEASONS, daysUntilNextSeason, nextSeason, type Season } from '../game/seasons';
 import type { Game, Lang } from '../game/state';
-import { VISITORS, VISITOR_IDS, type VisitorId } from '../game/visitors';
+import { VISITOR_IDS } from '../game/visitors';
 import {
   cropName, decoName, formatDate, formatDuration, getLang, materialName, onLangChange, seasonName, setLang, t, visitorName,
 } from '../i18n';
@@ -16,11 +16,6 @@ import { h, pixelImg } from './dom';
 import { edit } from './edit';
 
 type PanelKind = 'shop' | 'journal' | 'options' | 'dialog' | 'workshop' | 'letter';
-
-/** Le visiteur qu'attire une déco (s'il y en a un). */
-function visitorFor(deco: DecoId): VisitorId | undefined {
-  return VISITOR_IDS.find((id) => { const s = VISITORS[id].spot; return s.kind === 'deco' && s.deco === deco; });
-}
 
 interface OpenPanel {
   kind: PanelKind;
@@ -358,7 +353,8 @@ export class Hud implements SceneHooks {
             pixelImg(visitorIconUrl(id), 48, entry ? '' : 'silhouette'),
             h('strong', {}, entry ? visitorName(id) : t('journal.unknown')),
             entry ? h('small', {}, t('journal.met', { n: entry.count })) : null,
-            h('small', { class: 'hint' }, t(`visitor.hint.${id}`)),
+            // Laisser découvrir : la note d'observation n'apparaît qu'après la rencontre.
+            entry ? h('small', { class: 'hint' }, t(`visitor.hint.${id}`)) : null,
           );
         }),
       ),
@@ -399,10 +395,9 @@ export class Hud implements SceneHooks {
       const g = this.game;
       const letter = g.state.letter;
       if (!letter) {
-        const wait = Math.max(0, g.state.nextLetterAt - g.now());
         return [
           this.header(t('letter.title'), uiIconUrl('letter')),
-          h('p', { class: 'empty-note' }, t('letter.none'), h('br'), t('letter.next', { time: formatDuration(wait) })),
+          h('p', { class: 'empty-note' }, t('letter.none'), h('br'), t('letter.next')),
         ];
       }
       const r = letter.reward;
@@ -476,15 +471,13 @@ export class Hud implements SceneHooks {
     const order = [...DECO_IDS].sort((a, b) => Number(g.canCraft(b)) - Number(g.canCraft(a)));
     return [h('div', { class: 'card-list' }, ...order.map((id) => {
       const def = DECOS[id];
-      const visitor = visitorFor(id);
-      const metVisitor = visitor && g.state.journal.visitors[visitor];
       const seasonLocked = def.recipe.season && def.recipe.season !== season;
       return h('div', { class: `card craft-card${g.canCraft(id) ? ' ready' : ''}` },
         this.decoImg(id),
         h('div', { class: 'card-main' },
           h('strong', {}, decoName(id)),
+          // Laisser découvrir : on décrit l'objet, jamais le visiteur qu'il attire.
           h('small', {}, t(`deco.hint.${id}`)),
-          visitor ? h('small', { class: 'attracts' }, metVisitor ? t('workshop.attracts', { name: visitorName(visitor) }) : t('workshop.attractsUnknown')) : null,
           seasonLocked ? h('small', { class: 'muted' }, t('workshop.onlySeason', { season: seasonName(def.recipe.season!) })) : null,
           this.recipeChips(def.recipe),
         ),
