@@ -34,8 +34,17 @@ Un toucher = un câlin : l'amitié monte (un câlin compte toutes les 3 min, le 
 Fidèle au principe « laisser découvrir », le jeu n'en dit rien : il arrive sans annonce, le journal ne montre que les cœurs
 gagnés et une petite note, et les accessoires restent des silhouettes jusqu'à ce qu'on les débloque.
 
-Une seule action par toucher : sur une case en friche → la défricher, sur la terre → planter la graine choisie,
-sur une plante → l'arroser, sur une plante mûre (qui scintille) → récolter. Trouvailles, visiteurs, boîte aux lettres et arbre se touchent aussi.
+### Le jardinier
+
+Un petit jardinier en chapeau de paille fait tout le travail : chaque toucher lui confie une tâche, il marche jusqu'à la chose,
+se tourne vers elle et s'y met (binette pour défricher, arrosoir pour arroser). Plusieurs touchers s'enchaînent dans une file
+d'attente, marquée d'un petit repère sur les cases qui attendent. Il passe entre les rangs du potager mais contourne la cabane et l'arbre.
+Au repos, il cligne des yeux, regarde autour de lui, s'étire ; la nuit, il rentre dormir dans la cabane et en ressort dès qu'on l'appelle.
+Le corgi s'arrête pour l'attendre quand il vient lui faire un câlin.
+
+Une seule action par toucher, décidée quand le jardinier arrive : sur une case en friche → la défricher (le prix se confirme tout de suite),
+sur la terre → planter la graine choisie, sur une plante → l'arroser, sur une plante mûre (qui scintille) → récolter.
+Trouvailles, visiteurs, boîte aux lettres, arbre et corgi se touchent aussi. S'il manque des pièces ou des graines, la suite de la file est oubliée.
 
 ## Principe de design : laisser découvrir
 
@@ -90,7 +99,8 @@ src/
     draw.ts      décors procéduraux : herbe, terre, cabane, arbres… par saison
     textures.ts  enregistrement des textures pour Phaser et l'interface
   scenes/      GardenScene : le jardin, les interactions, les petits effets
-               Corgi.ts / route.ts : promenade du compagnon (trajets qui contournent le potager)
+               Gardener.ts : le jardinier (file de tâches, outils, repos, nuit dans la cabane)
+               Corgi.ts / route.ts : promenade du compagnon et trajets du jardinier (contourner la cabane, l'arbre…)
   ui/          interface HTML : barres, boutique, atelier, courrier, journal, options, mode déco
   i18n/        traductions FR / EN
 scripts/
@@ -116,5 +126,6 @@ depuis la console (`chilloff.state`).
 - [x] **Courrier** des voisins, cueillette, arbre à secouer
 - [ ] **Croisements** : deux plantes voisines peuvent donner une variété rare
 - [x] **Un compagnon** (corgi) avec 5 accessoires débloqués par l'amitié
+- [x] **Un jardinier** qui se déplace pour faire chaque action
 - [ ] **Jalons du journal** qui débloquent de la déco
 - [ ] Objectif du jour, musique douce, déco de saison

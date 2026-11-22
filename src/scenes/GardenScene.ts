@@ -1,11 +1,12 @@
 // La scène du jardin : décor, potager, jardin vivant (trouvailles, visiteurs, déco, courrier),
-// interactions au toucher/clic et petits effets.
+// interactions au toucher/clic et petits effets. Chaque toucher confie une tâche au jardinier,
+// qui marche jusqu'à la chose avant d'agir (voir Gardener.ts).
 
 import Phaser from 'phaser';
 import { BACKDROP, rng } from '../art/draw';
 import { LEAF_BITS } from '../art/living-sprites';
 import { GRASS_VARIANTS, PATH_VARIANTS, TREE_VARIANTS, WILD_VARIANTS, registerTextures } from '../art/textures';
-import { PLOT_COLS, PLOT_ORIGIN, PLOT_ROWS, TILE, WORLD_COLS, WORLD_ROWS } from '../game/config';
+import { PLOT_COLS, PLOT_ORIGIN, PLOT_ROWS, TILE, WORLD_COLS, WORLD_ROWS, tillCost } from '../game/config';
 import { DECOS } from '../game/decor';
 import { growthStage, isRipe, isWet, timeUntilRipe } from '../game/growth';
 import type { Season } from '../game/seasons';
@@ -14,10 +15,12 @@ import { GARDEN_MAX_ROW, GARDEN_MIN_ROW, MAILBOX_TILE, TREE_POS, tileFoot } from
 import { cropName, formatDuration, giftLabel, materialName, t, visitorName } from '../i18n';
 import { edit } from '../ui/edit';
 import { Corgi } from './Corgi';
+import { Gardener, type Job, type Tool } from './Gardener';
 
 export interface SceneHooks {
   toast(message: string): void;
-  confirmTill(cost: number, onConfirm: () => void): void;
+  /** `reserved` : pièces déjà promises aux cases que le jardinier va défricher. */
+  confirmTill(cost: number, reserved: number, onConfirm: () => void): void;
   openShop(tab: 'buy' | 'sell'): void;
   openLetter(): void;
   /** Premier câlin : on choisit le nom du compagnon. */
@@ -78,6 +81,7 @@ export class GardenScene extends Phaser.Scene {
   private lightLevel = 0;
   private wateredHintShown = false;
   private corgi!: Corgi;
+  private gardener!: Gardener;
 
   constructor(private garden: Game, private hooks: SceneHooks) {
     super('garden');
@@ -91,11 +95,18 @@ export class GardenScene extends Phaser.Scene {
     this.buildDecor();
     this.buildPlot();
     this.corgi = new Corgi(this, this.garden, {
-      onTap: () => this.petCorgi(),
+      onTap: () => {
+        if (edit.active) return;
+        this.ask({
+          key: 'corgi', target: () => ({ x: this.corgi.img.x, y: this.corgi.img.y }),
+          start: () => this.corgi.wait(), act: () => this.petCorgi(),
+        });
+      },
       onDug: (item) => this.onDug(item),
       dust: (x, y) => this.dirt(x, y),
       zzz: (x, y) => this.zzz(x, y),
     }, DEPTH_OBJECTS);
+    this.gardener = new Gardener(this, this.garden, DEPTH_OBJECTS);
 
     this.editGrid = this.add.graphics().setDepth(DEPTH_EDIT_GRID);
     this.cursorImg = this.add.image(0, 0, 'fx_cursor').setOrigin(0, 0).setDepth(DEPTH_FX).setVisible(false);
@@ -123,6 +134,7 @@ export class GardenScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     this.corgi.update(Math.min(delta, 100));
+    this.gardener.update(Math.min(delta, 100));
   }
 
   // --- Construction du décor ------------------------------------------------
@@ -152,8 +164,10 @@ export class GardenScene extends Phaser.Scene {
     this.mailbox = this.add.image(mb.x, mb.y, 'mailbox_down').setOrigin(0.5, 1).setDepth(DEPTH_OBJECTS + mb.y);
     const openMail = () => {
       if (edit.active) return;
-      this.wiggle(this.mailbox);
-      this.hooks.openLetter();
+      this.ask({
+        key: 'mail', marker: this.marker(MAILBOX_TILE.col, MAILBOX_TILE.row), target: () => mb,
+        act: () => { this.wiggle(this.mailbox); this.hooks.openLetter(); },
+      });
     };
     // Zone de toucher plus large que le dessin (qui est fin), pour ne jamais la rater.
     this.mailbox.setInteractive({ hitArea: new Phaser.Geom.Rectangle(-4, 2, 24, 22), hitAreaCallback: Phaser.Geom.Rectangle.Contains, useHandCursor: true })
@@ -165,7 +179,9 @@ export class GardenScene extends Phaser.Scene {
 
     // L'arbre du jardin : on peut le secouer.
     this.mainTree = this.addTree(TREE_POS.x, TREE_POS.footY, 0);
-    this.mainTree.setInteractive({ useHandCursor: true }).on('pointerdown', () => { if (!edit.active) this.shakeTree(); });
+    this.mainTree.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+      if (!edit.active) this.ask({ key: 'tree', target: () => ({ x: TREE_POS.x, y: TREE_POS.footY }), act: () => this.shakeTree() });
+    });
 
     this.addBush(0, 11 * TILE);
     this.addBush(11 * TILE, 11 * TILE);
@@ -313,7 +329,14 @@ export class GardenScene extends Phaser.Scene {
     const foot = tileFoot(f.col, f.row);
     const shadow = this.add.image(foot.x, foot.y - 3, 'fx_shadow').setDepth(DEPTH_SOIL + 0.5);
     const img = this.add.image(foot.x, foot.y - 2, `mat_${f.id}`).setOrigin(0.5, 1).setDepth(DEPTH_OBJECTS + foot.y);
-    img.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.collect(f.uid));
+    img.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+      if (edit.active) return;
+      this.ask({
+        key: `forage:${f.uid}`, marker: this.marker(f.col, f.row),
+        target: () => (this.garden.state.forage.some((x) => x.uid === f.uid) ? foot : null),
+        act: () => this.collect(f.uid),
+      });
+    });
     this.appear(img);
     this.tweens.add({ targets: img, y: foot.y - 3, duration: 900 + (f.uid % 5) * 120, yoyo: true, repeat: -1, ease: 'Stepped' });
     return { img, extras: [shadow] };
@@ -337,7 +360,16 @@ export class GardenScene extends Phaser.Scene {
     const img = this.add.image(v.x, v.y, `vis_${v.id}`).setOrigin(0.5, 1);
     img.setDepth(v.perch ? DEPTH_PERCHED : DEPTH_OBJECTS + v.y + 0.25);
     if (v.uid % 2 === 0) img.setFlipX(true);
-    img.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.greet(v.uid));
+    img.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+      if (edit.active) return;
+      // Un visiteur perché se salue depuis le pied de son perchoir.
+      const at = v.perch ? tileFoot(v.col, v.row) : { x: v.x, y: v.y };
+      this.ask({
+        key: `visitor:${v.uid}`,
+        target: () => (this.garden.state.visitors.some((x) => x.uid === v.uid) ? at : null),
+        act: () => this.greet(v.uid),
+      });
+    });
     const extras: Phaser.GameObjects.GameObject[] = [];
     if (v.id === 'firefly') {
       const glow = this.add.image(v.x, v.y - 6, 'fx_glow').setBlendMode(Phaser.BlendModes.ADD).setDepth(DEPTH_LIGHT).setScale(0.6);
@@ -356,7 +388,6 @@ export class GardenScene extends Phaser.Scene {
   }
 
   private collect(uid: number): void {
-    if (edit.active) return;
     const view = this.forageViews.get(uid);
     const res = this.garden.collect(uid);
     if (!res.ok || !view) return;
@@ -366,7 +397,6 @@ export class GardenScene extends Phaser.Scene {
   }
 
   private greet(uid: number): void {
-    if (edit.active) return;
     const view = this.visitorViews.get(uid);
     const res = this.garden.greet(uid);
     if (!res.ok || !view) return;
@@ -406,6 +436,7 @@ export class GardenScene extends Phaser.Scene {
 
   private onEditChanged(): void {
     if (edit.active) {
+      this.gardener.clear(true);
       this.drawEditGrid();
       if (edit.hand) this.ghost.setTexture(`deco_${edit.hand}`);
     } else {
@@ -507,33 +538,73 @@ export class GardenScene extends Phaser.Scene {
     if (i < 0) return;
     this.showCursorAt(PLOT_ORIGIN.col + (i % PLOT_COLS), PLOT_ORIGIN.row + Math.floor(i / PLOT_COLS));
     if (p.wasTouch) this.time.delayedCall(250, () => this.cursorImg.setVisible(false));
-    this.actOn(i);
+    this.tapPlot(i);
   }
 
-  /** Une seule action par toucher, selon l'état de la case. */
-  private actOn(i: number): void {
+  // --- Le jardinier -------------------------------------------------------------
+
+  /** Confie une tâche au jardinier (une même chose n'est demandée qu'une fois). */
+  private ask(job: Job): void {
+    this.gardener.add(job);
+  }
+
+  /** Petit repère au sol sur une case où le jardinier a quelque chose à faire. */
+  private marker(col: number, row: number): Phaser.GameObjects.Image {
+    return this.add.image(col * TILE - 1, row * TILE - 1, 'fx_cursor').setOrigin(0, 0).setAlpha(0.45).setDepth(DEPTH_FX - 3);
+  }
+
+  private tapPlot(i: number): void {
+    const g = this.garden;
+    const col = PLOT_ORIGIN.col + (i % PLOT_COLS), row = PLOT_ORIGIN.row + Math.floor(i / PLOT_COLS);
+    const job = (key?: string): Job => ({
+      key, marker: this.marker(col, row), target: () => tileFoot(col, row),
+      tool: () => this.toolFor(i), act: () => this.actOn(i),
+    });
+    // Défricher coûte des pièces : on confirme tout de suite, le jardinier s'en charge ensuite.
+    // (Si la case est déjà promise au défrichage, un nouveau toucher demande la suite : planter.)
+    if (!g.state.plots[i].tilled && !this.gardener.has(`till:${i}`)) {
+      const pending = this.gardener.count('till:');
+      const tilled = g.state.plots.filter((p) => p.tilled).length;
+      let reserved = 0;
+      for (let k = 0; k < pending; k++) reserved += tillCost(tilled + k);
+      this.hooks.confirmTill(tillCost(tilled + pending), reserved, () => this.ask(job(`till:${i}`)));
+      return;
+    }
+    this.ask(job());
+  }
+
+  /** L'outil en main au moment d'agir sur une case. */
+  private toolFor(i: number): Tool | null {
+    const tile = this.garden.state.plots[i];
+    if (!tile.tilled) return 'hoe';
+    if (tile.plant && !isRipe(tile.plant) && !isWet(tile, this.garden.now())) return 'can';
+    return null;
+  }
+
+  /**
+   * Une seule action par toucher, selon l'état de la case quand le jardinier y arrive.
+   * false : quelque chose manque (pièces, graines), la suite de la file est oubliée.
+   */
+  private actOn(i: number): boolean {
     const g = this.garden;
     const tile = g.state.plots[i];
     const view = this.views[i];
 
     if (!tile.tilled) {
-      const cost = g.tillCost();
-      this.hooks.confirmTill(cost, () => {
-        const res = g.till(i);
-        if (res.ok) { this.dust(view.soil); this.pop(view.soil); this.hooks.toast(t('toast.tilled')); }
-        else if (res.reason === 'notEnoughCoins') this.hooks.toast(t('toast.notEnoughCoins'));
-      });
-      return;
+      const res = g.till(i);
+      if (res.ok) { this.dust(view.soil); this.pop(view.soil); this.hooks.toast(t('toast.tilled')); return true; }
+      if (res.reason === 'notEnoughCoins') this.hooks.toast(t('toast.notEnoughCoins'));
+      return false;
     }
 
     if (!tile.plant) {
       const res = g.plant(i);
-      if (res.ok) { view.lastKey = `plant_${res.crop}_0`; view.plant.setTexture(view.lastKey).setVisible(true); this.pop(view.plant); }
-      else if (res.reason === 'noSeeds') {
+      if (res.ok) { view.lastKey = `plant_${res.crop}_0`; view.plant.setTexture(view.lastKey).setVisible(true); this.pop(view.plant); return true; }
+      if (res.reason === 'noSeeds') {
         this.hooks.toast(t('toast.noSeeds', { crop: cropName(g.state.selectedSeed!) }));
         this.hooks.openShop('buy');
       } else if (res.reason === 'noSeedSelected') this.hooks.toast(t('toast.noSeedSelected'));
-      return;
+      return false;
     }
 
     if (isRipe(tile.plant)) {
@@ -542,7 +613,7 @@ export class GardenScene extends Phaser.Scene {
         this.flyIcon(view.plant.x, view.plant.y - TILE, `icon_${res.crop}`);
         if (res.first) this.hooks.toast(t('toast.firstHarvest', { crop: cropName(res.crop) }));
       }
-      return;
+      return true;
     }
 
     if (!isWet(tile, g.now()) && g.water(i).ok) {
@@ -550,13 +621,14 @@ export class GardenScene extends Phaser.Scene {
       if (!this.wateredHintShown) {
         this.wateredHintShown = true;
         this.hooks.toast(t('toast.watered'));
-        return;
+        return true;
       }
     }
     const now = g.now();
     const left = timeUntilRipe(tile.plant, tile.wetUntil, now);
     this.hooks.toast(t('toast.growingWet', { crop: cropName(tile.plant.id), time: formatDuration(left) }));
     this.wiggle(view.plant);
+    return true;
   }
 
   // --- Petits effets --------------------------------------------------------
@@ -625,7 +697,6 @@ export class GardenScene extends Phaser.Scene {
   // --- Compagnon --------------------------------------------------------------
 
   private petCorgi(): void {
-    if (edit.active) return;
     const g = this.garden;
     const res = g.petCompanion();
     const { x, y } = this.corgi.img;

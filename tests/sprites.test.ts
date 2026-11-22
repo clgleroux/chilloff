@@ -67,3 +67,12 @@ describe('pixel art du compagnon', () => {
     checkSprite('coche', CHECK_BADGE, 6, 6);
   });
 });
+
+import { GARDENER_FRAMES, GARDENER_PALETTE, GARDENER_TOOLS } from '../src/art/living-sprites';
+
+describe('pixel art du jardinier', () => {
+  it('le jardinier fait 16×24, ses outils sont rectangulaires', () => {
+    for (const [k, rows] of Object.entries(GARDENER_FRAMES)) checkGrid(`jardinier ${k}`, rows, 16, 24, new Set(['.', ...Object.keys(GARDENER_PALETTE)]));
+    for (const [k, s] of Object.entries(GARDENER_TOOLS)) checkSprite(`outil ${k}`, s, s.rows[0].length, s.rows.length);
+  });
+});

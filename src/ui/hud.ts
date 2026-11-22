@@ -199,8 +199,8 @@ export class Hud implements SceneHooks {
     ]);
   }
 
-  confirmTill(cost: number, onConfirm: () => void): void {
-    if (this.game.state.coins < cost) {
+  confirmTill(cost: number, reserved: number, onConfirm: () => void): void {
+    if (this.game.state.coins - reserved < cost) {
       this.toast(`${t('toast.notEnoughCoins')} (${cost})`);
       return;
     }

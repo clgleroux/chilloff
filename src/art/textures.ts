@@ -6,8 +6,9 @@ import { SEASONS } from '../game/seasons';
 import * as draw from './draw';
 import { ACCESSORY_IDS, type AccessoryId } from '../game/companion';
 import {
-  ACCESSORY_SPRITES, CHECK_BADGE, CORGI_FRAMES, CORGI_PALETTE, DECO_SPRITES, EXTRA_UI_ICONS, HEART, HOLE,
-  MAILBOX_SPRITES, MATERIAL_SPRITES, VISITOR_SPRITES, ZZZ, type CorgiFrame, type PixelSprite,
+  ACCESSORY_SPRITES, CHECK_BADGE, CORGI_FRAMES, CORGI_PALETTE, DECO_SPRITES, EXTRA_UI_ICONS, GARDENER_FRAMES,
+  GARDENER_PALETTE, GARDENER_TOOLS, HEART, HOLE, MAILBOX_SPRITES, MATERIAL_SPRITES, VISITOR_SPRITES, ZZZ,
+  type CorgiFrame, type PixelSprite,
 } from './living-sprites';
 import { UI_ICONS } from './sprites';
 
@@ -94,6 +95,8 @@ function buildAll(): CanvasMap {
   for (const acc of [null, ...ACCESSORY_IDS]) {
     for (const frame of Object.keys(CORGI_FRAMES) as CorgiFrame[]) m.set(`corgi_${acc ?? 'none'}_${frame}`, corgi(frame, acc));
   }
+  for (const [frame, rows] of Object.entries(GARDENER_FRAMES)) m.set(`gardener_${frame}`, sprite({ rows, palette: GARDENER_PALETTE }));
+  for (const [id, sp] of Object.entries(GARDENER_TOOLS)) m.set(`tool_${id}`, sprite(sp));
   const ready = new draw.Painter(16, 16);
   ready.strings(EXTRA_UI_ICONS.letter.rows, EXTRA_UI_ICONS.letter.palette);
   ready.strings(CHECK_BADGE.rows, CHECK_BADGE.palette, 10, 0);
