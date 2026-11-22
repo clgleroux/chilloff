@@ -1,4 +1,5 @@
 // Parcours complet dans un vrai navigateur : planter, arroser, défricher, récolter, vendre, recharger, changer de langue.
+// Chaque toucher confie une tâche au jardinier : on attend qu'il ait fini avant de vérifier.
 // Usage : npm run build && npx vite preview --port 4173 &  puis  node scripts/e2e.mjs
 
 import assert from 'node:assert/strict';
@@ -21,16 +22,23 @@ await page.waitForTimeout(1200);
 
 const save = () => page.evaluate((k) => JSON.parse(localStorage.getItem(k)), KEY);
 
-/** Toucher un point du monde (pixels du jeu ; monde 192×208 centré, zoom entier). */
-async function tapWorld(x, y) {
+/** Attendre que le jardinier ait fini tout ce qu'on lui a demandé. */
+async function idle() {
+  await page.waitForFunction(() => !window.chilloffScene.gardener.busy, null, { timeout: 20_000 });
+  await page.waitForTimeout(150);
+}
+
+/** Toucher un point du monde (pixels du jeu ; monde 192×208 centré, zoom entier), puis attendre le jardinier. */
+async function tapWorld(x, y, { wait = true } = {}) {
   const box = await page.locator('#game canvas').boundingBox();
   const zoom = Math.max(1, Math.floor(Math.min(box.width / 192, box.height / 208)));
   const ox = box.x + box.width / 2 - 96 * zoom, oy = box.y + box.height / 2 - 104 * zoom;
   await page.touchscreen.tap(ox + x * zoom, oy + y * zoom);
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(wait ? 250 : 60);
+  if (wait) await idle();
 }
 /** Centre d'une case du potager. */
-const tap = (col, row) => tapWorld((3 + col + 0.5) * 16, (5 + row + 0.5) * 16);
+const tap = (col, row, opts) => tapWorld((3 + col + 0.5) * 16, (5 + row + 0.5) * 16, opts);
 /** Centre d'une case du jardin. */
 const tapTile = (col, row) => tapWorld((col + 0.5) * 16, (row + 0.5) * 16);
 
@@ -59,10 +67,23 @@ s = await save();
 assert.ok(s.plots[13].wetUntil > now);
 step('arroser');
 
+// 2 bis. Le jardinier enchaîne : deux touchers à la suite, deux graines plantées, et il est allé jusque-là.
+await tap(2, 2, { wait: false });
+await tap(3, 2, { wait: false });
+assert.equal(await page.evaluate(() => window.chilloffScene.gardener.busy), true);
+await idle();
+s = await save();
+assert.equal(s.plots[14].plant?.id, 'beet');
+assert.equal(s.plots[15].plant?.id, 'beet');
+const pos = await page.evaluate(() => ({ x: window.chilloffScene.gardener.img.x, y: window.chilloffScene.gardener.img.y }));
+assert.ok(Math.abs(pos.y - (5 + 3) * 16) <= 1 && Math.abs(pos.x - (3 + 3.5) * 16) <= 14, `jardinier près de la case : ${JSON.stringify(pos)}`);
+step('file d’attente du jardinier');
+
 // 3. Défricher une case (confirmation)
 await tap(0, 0);
 await page.locator('.panel-dialog .btn.primary').click();
 await page.waitForTimeout(300);
+await idle();
 s = await save();
 assert.equal(s.plots[0].tilled, true);
 assert.equal(s.coins, 10);

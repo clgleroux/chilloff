@@ -32,3 +32,52 @@ describe('promenade du corgi', () => {
     expect(crosses(from, route(from, to))).toBe(false);
   });
 });
+
+import { approach, GARDENER_OBSTACLES, REACH, WALK_AREA } from '../src/scenes/route';
+
+describe('le jardinier', () => {
+  const free = (p: Point) =>
+    p.x >= WALK_AREA.x0 && p.x <= WALK_AREA.x1 && p.y >= WALK_AREA.y0 && p.y <= WALK_AREA.y1
+    && !GARDENER_OBSTACLES.some((r) => p.x > r.x0 && p.x < r.x1 && p.y > r.y0 && p.y < r.y1);
+
+  it('se tient à côté d’une case du potager, du côté d’où il vient, tourné vers elle', () => {
+    const tile = { x: 88, y: 128 };
+    expect(approach(tile, { x: 20, y: 128 })).toEqual({ at: { x: 88 - REACH, y: 128 }, face: 1 });
+    expect(approach(tile, { x: 180, y: 60 })).toEqual({ at: { x: 88 + REACH, y: 128 }, face: -1 });
+  });
+
+  it('touche la boîte aux lettres depuis le côté libre (pas dans la cabane)', () => {
+    const { at, face } = approach({ x: 72, y: 64 }, { x: 20, y: 120 });
+    expect(free(at)).toBe(true);
+    expect(at.x).toBeGreaterThan(72);
+    expect(face).toBe(-1);
+  });
+
+  it('secoue l’arbre et salue les oiseaux perchés depuis le bas', () => {
+    for (const target of [{ x: 160, y: 62 }, { x: 153, y: 36 }]) {
+      const { at } = approach(target, { x: 60, y: 76 });
+      expect(free(at)).toBe(true);
+      expect(at.y).toBeGreaterThan(62);
+    }
+  });
+
+  it('reste dans le jardin près des bords', () => {
+    for (const target of [{ x: 8, y: 192 }, { x: 184, y: 192 }, { x: 8, y: 80 }]) {
+      expect(free(approach(target, { x: 96, y: 100 }).at)).toBe(true);
+    }
+  });
+
+  it('traverse le potager mais contourne la cabane', () => {
+    const from = { x: 100, y: 190 }, to = { x: 30, y: 74 };
+    const path = route(from, to, GARDENER_OBSTACLES);
+    let prev = from;
+    for (const p of path) {
+      for (let i = 0; i <= 20; i++) {
+        const x = prev.x + ((p.x - prev.x) * i) / 20, y = prev.y + ((p.y - prev.y) * i) / 20;
+        expect(GARDENER_OBSTACLES.some((r) => x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1)).toBe(false);
+      }
+      prev = p;
+    }
+    expect(route({ x: 40, y: 120 }, { x: 160, y: 120 }, GARDENER_OBSTACLES)).toHaveLength(2);
+  });
+});

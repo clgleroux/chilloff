@@ -696,3 +696,107 @@ export const CHECK_BADGE: PixelSprite = {
   palette: { k: K, g: '#5aa34a', w: '#ffffff' },
   rows: ['.kkkk.', 'kggggk', 'kgggwk', 'kwgwgk', 'kgwggk', '.kkkk.'],
 };
+
+// ---------------------------------------------------------------------------
+// Le jardinier (16×24) : de face au repos, de profil (tourné vers la gauche, retourné par la scène)
+// quand il marche ou travaille. Chapeau de paille et salopette.
+
+export type GardenerFrame = 'front' | 'blink' | 'walkA' | 'walkB' | 'work';
+
+export const GARDENER_PALETTE: Record<string, string> = {
+  k: K, y: '#f0d27a', Y: '#d8b050', r: '#c4503a', h: '#7a4a2e', s: '#f2c49a', S: '#d89a70', e: K,
+  p: '#f0a0b0', w: '#fff1dc', b: '#5a8ac4', B: '#3f6a9e', d: '#6e4228',
+};
+
+const HAT = [
+  E, E,
+  '......kkkk......',
+  '.....kyYYyk.....',
+  '....kyyYYyyk....',
+  '...kkrrrrrrkk...',
+  '.kyyyyyyyyyyyyk.',
+];
+
+const FRONT_BODY = [
+  '....kpsssspk....',
+  '.....kssssk.....',
+  '...kkwwSSwwkk...',
+  '..kwwbwwwwbwwk..',
+  '..kwwbbbbbbwwk..',
+  '..kwkbbbbbbkwk..',
+  '..kskbbbbbbksk..',
+  '...kkbbbbbbkk...',
+  '....kbbbbbbk....',
+  '....kbbkkbbk....',
+  '....kBBkkBBk....',
+  '....kddkkddk....',
+  '...kddk..kddk...',
+  '...kkkk..kkkk...',
+  E,
+];
+
+const SIDE_HEAD = [
+  '..kkkkhhhhhkkk..',
+  '....kseshhhk....',
+  '...ksspssshk....',
+  '....kkssssk.....',
+  '.....kwSwwk.....',
+  '....kwwbwwwk....',
+  '....kwbbbbbk....',
+];
+
+const LEGS_STRIDE = [
+  '....kbbkkbbk....',
+  '...kBBk..kBBk...',
+  '...kddk..kddk...',
+  '..kddk...kddk...',
+  '..kkkk...kkkk...',
+  E,
+];
+
+const LEGS_TOGETHER = [
+  '.....kbbbbk.....',
+  '.....kBBBBk.....',
+  '.....kddddk.....',
+  '....kddddk......',
+  '....kkkkkk......',
+  E,
+];
+
+export const GARDENER_FRAMES: Record<GardenerFrame, string[]> = {
+  front: [...HAT, '.kkkkhhhhhhkkkk.', '....ksessesk....', ...FRONT_BODY],
+  blink: [...HAT, '.kkkkhhhhhhkkkk.', '....ksSssSsk....', ...FRONT_BODY],
+  walkA: [...HAT, ...SIDE_HEAD, '....kbwwbbbk....', '....kbssbbbk....', '....kbbbbbbk....', '....kbbbbbbk....', ...LEGS_STRIDE],
+  walkB: [...HAT, ...SIDE_HEAD, '....kbwwbbbk....', '....kbssbbbk....', '....kbbbbbbk....', '....kbbbbbbk....', ...LEGS_TOGETHER],
+  work: [...HAT, ...SIDE_HEAD, '.ksswwbbbbbk....', '..kk.kbbbbbk....', '....kbbbbbbk....', '....kbbbbbbk....', ...LEGS_TOGETHER],
+};
+
+/** Outils tenus pendant le travail, dessinés tournés vers la gauche, posés au bout de la main. */
+export const GARDENER_TOOLS: Record<'can' | 'hoe', PixelSprite> = {
+  can: {
+    palette: { k: K, g: '#6cc45a', G: '#3f8a3e', w: '#d4f0ff' },
+    rows: [
+      '....kkkk.',
+      'k..kgggGk',
+      'gk.kk..kk',
+      '.gkggggGk',
+      '..kggggGk',
+      '...kGGGk.',
+      '....kkk..',
+    ],
+  },
+  hoe: {
+    palette: { k: K, b: '#b07848', B: '#7a4a2e', g: '#c8c8d8', G: '#7e7e92' },
+    rows: [
+      '.......kk',
+      '......kbk',
+      '.....kbk.',
+      '....kbk..',
+      '...kbk...',
+      'kkkbk....',
+      'kgGkk....',
+      'kgGk.....',
+      'kkk......',
+    ],
+  },
+};

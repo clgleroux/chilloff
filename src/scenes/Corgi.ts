@@ -49,6 +49,15 @@ export class Corgi {
     this.scene.tweens.add({ targets: this.img, y: this.img.y - 3, duration: 110, yoyo: true, repeat: 1 });
   }
 
+  /** Le jardinier vient le voir : il s'arrête et l'attend un moment (sauf s'il dort ou qu'il creuse). */
+  wait(): void {
+    if (this.sleeping || this.mode === 'dig') return;
+    this.path = [];
+    this.arrive = null;
+    this.setMode('idle', 8000);
+    this.render('walkA');
+  }
+
   update(delta: number): void {
     this.timer -= delta;
     this.frameClock += delta;
