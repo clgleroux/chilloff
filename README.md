@@ -92,7 +92,11 @@ npm install
 npm run dev        # serveur de dev, accessible aussi depuis le téléphone sur le même Wi-Fi
 npm test           # tests des règles (pousse, saisons, sauvegarde, sprites)
 npm run build      # version de production dans dist/
+npm run e2e        # build + parcours complet dans Chrome
+npm run shots      # build + captures dans screenshots/ (ONLY=farm,atlas pour en choisir, SPRITES=deco_ pour une planche de sprites)
 ```
+
+Pour les agents de code (Claude, Codex…) : consignes dans `AGENTS.md`, recettes dans `.claude/skills/`.
 
 Chaque push sur `main` déploie automatiquement le jeu sur GitHub Pages (`.github/workflows/deploy.yml`).
 
@@ -129,6 +133,7 @@ scripts/
   generate_icons.py  icônes de l'appli (Pillow)
   screenshots.mjs    captures d'écran mobile/bureau/saisons pour vérifier le rendu
   e2e.mjs            parcours complet dans un vrai navigateur
+  with-preview.mjs   lance le serveur de prévisualisation le temps d'un script (npm run e2e / shots)
 ```
 
 Astuces : ajoute `?atlas` à l'adresse pour voir la planche de tous les sprites, et `?debug` pour accéder à la partie

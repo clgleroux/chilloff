@@ -9,6 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",
     "test": "vitest run",
+    "e2e": "npm run build && node scripts/with-preview.mjs scripts/e2e.mjs",
+    "shots": "npm run build && node scripts/with-preview.mjs scripts/screenshots.mjs",
     "icons": "python3 scripts/generate_icons.py"
   },
   "repository": {
