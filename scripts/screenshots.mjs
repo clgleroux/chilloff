@@ -1,6 +1,9 @@
 // Captures d'écran du jeu (mobile, bureau, saisons, nuit, planche de sprites) pour vérifier le rendu.
 // Usage : npm run build && npx vite preview --port 4173 &  puis  node scripts/screenshots.mjs
-// Variables : CHROME (chemin du navigateur), URL (défaut http://localhost:4173/).
+//    ou simplement : npm run shots
+// Variables : CHROME (chemin du navigateur), URL (défaut http://localhost:4173/),
+//             ONLY (n'en faire que certaines : ONLY=farm,atlas → les captures dont le nom contient « farm » ou « atlas »),
+//             SPRITES (seulement une planche de quelques textures : SPRITES=deco_birdhouse,corgi_ → screenshots/sprites.png).
 
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -71,7 +74,10 @@ async function tapWorld(page, x, y) {
   await page.waitForTimeout(400);
 }
 
+const ONLY = (process.env.ONLY ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+
 async function shot(browser, name, { width, height, scale = 2, date, season, fresh = false, action, path = '' }) {
+  if (ONLY.length && !ONLY.some((s) => name.includes(s))) return;
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, hasTouch: width < 700, locale: 'fr-FR' });
   const page = await context.newPage();
   const errors = [];
@@ -92,6 +98,35 @@ async function shot(browser, name, { width, height, scale = 2, date, season, fre
 
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] });
 const autumnDay = new Date(2026, 10, 16, 14, 0);
+
+// SPRITES=deco_birdhouse,vis_ : une petite planche avec seulement ces textures (zoom ×4), dans screenshots/sprites.png.
+if (process.env.SPRITES) {
+  const wanted = process.env.SPRITES.split(',').map((s) => s.trim()).filter(Boolean);
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  await page.goto(URL + '?atlas');
+  await page.waitForTimeout(800);
+  const box = await page.evaluate((w) => {
+    let x0 = Infinity, y0 = Infinity, x1 = 0, y1 = 0, n = 0;
+    const figs = [...document.querySelectorAll('figure')];
+    for (const fig of figs) {
+      const keep = w.some((s) => fig.querySelector('figcaption').textContent.includes(s));
+      fig.style.display = keep ? '' : 'none';
+    }
+    for (const fig of figs) {
+      if (fig.style.display === 'none') continue;
+      n++;
+      for (const el of fig.children) { // la figure s'étire dans la grille : on mesure le dessin et sa légende
+        const r = el.getBoundingClientRect();
+        x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top); x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom);
+      }
+    }
+    return n ? { n, x: Math.max(0, x0 - 8), y: Math.max(0, y0 - 8), width: x1 - x0 + 16, height: y1 - y0 + 16 } : { n };
+  }, wanted);
+  if (box.n) await page.screenshot({ path: `${OUT}/sprites.png`, fullPage: true, clip: box });
+  console.log(box.n ? `sprites.png : ${box.n} texture(s)` : `aucune texture ne contient : ${wanted.join(', ')}`);
+  await browser.close();
+  process.exit(box.n ? 0 : 1);
+}
 
 await shot(browser, 'atlas', { width: 1400, height: 1100, scale: 1, path: '?atlas', fresh: true });
 await shot(browser, 'mobile-new-game', { width: 390, height: 844, date: autumnDay, fresh: true });

@@ -1,6 +1,6 @@
 // Parcours complet dans un vrai navigateur : planter, arroser, défricher, récolter, vendre, recharger, changer de langue.
 // Chaque toucher confie une tâche au jardinier : on attend qu'il ait fini avant de vérifier.
-// Usage : npm run build && npx vite preview --port 4173 &  puis  node scripts/e2e.mjs
+// Usage : npm run e2e   (ou : npm run build && npx vite preview --port 4173 &  puis  node scripts/e2e.mjs)
 
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
