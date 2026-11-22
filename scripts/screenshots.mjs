@@ -45,6 +45,11 @@ function demoSave(now, season) {
     decor: { placed, inventory: { pond: 1, lantern: 1 } },
     materials: { twig: 5, pebble: 3, [seasonMat]: 2 },
     lettersDone: 3,
+    farm: {
+      coop: { renovated: true, animals: 3, progress: 99 * HOUR, updatedAt: now, fedUntil: 0 },
+      barn: { renovated: true, animals: 2, progress: 0, updatedAt: now, fedUntil: now + HOUR },
+    },
+    produce: { egg: 2 },
     companion: { name: 'Biscotte', friendship: 16, lastPetAt: 0, lastPetDay: '', accessory: 'bandana', nextDigAt: now + 3600000 },
     version: 1, createdAt: now - 3 * 86400000, updatedAt: now, coins: 137, plots,
     seeds: { [crops[0]]: 4, [crops[1]]: 2, [crops[2]]: 1 }, basket: { [crops[0]]: 3, [crops[1]]: 1 },
@@ -131,5 +136,14 @@ await shot(browser, 'mobile-garden-corgi', {
   },
 });
 await shot(browser, 'desktop-summer-night', { width: 1440, height: 900, scale: 1, date: new Date(2027, 6, 10, 23, 30), season: 'summer' });
+// La ferme : sur téléphone, un second écran (la caméra glisse) ; sur un écran large, à côté du jardin.
+const farmView = async (p) => { await p.evaluate(() => window.chilloffScene.showView('farm', false)); await p.waitForTimeout(1500); };
+await shot(browser, 'mobile-farm', { width: 390, height: 844, date: autumnDay, season: 'autumn', path: '?debug', action: farmView });
+await shot(browser, 'mobile-farm-winter-night', { width: 390, height: 844, date: new Date(2026, 11, 20, 23, 0), season: 'winter', path: '?debug', action: farmView });
+await shot(browser, 'mobile-farm-building', {
+  width: 390, height: 844, date: autumnDay, season: 'autumn', path: '?debug',
+  action: async (p) => { await farmView(p); await p.evaluate(() => window.chilloffScene.hooks.openBuilding('coop')); await p.waitForTimeout(400); },
+});
+await shot(browser, 'mobile-landscape', { width: 844, height: 390, date: new Date(2027, 3, 10, 10, 0), season: 'spring' });
 
 await browser.close();

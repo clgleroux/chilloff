@@ -1,22 +1,28 @@
 // Interface HTML par-dessus le jeu : barre du haut, graines, boutique, journal, options, bulles.
 
-import { corgiUrl, cropIconUrl, decoIconUrl, materialIconUrl, textureUrl, uiIconUrl, visitorIconUrl } from '../art/textures';
+import {
+  animalIconUrl, buildingUrl, corgiUrl, cropIconUrl, decoIconUrl, materialIconUrl, produceIconUrl, textureUrl, uiIconUrl, visitorIconUrl,
+} from '../art/textures';
 import { ACCESSORY_IDS, NAME_MAX_LENGTH, accessoryHearts, type AccessoryId } from '../game/companion';
 import { CROPS, CROP_IDS, cropsForSeason, type CropId } from '../game/crops';
 import { DECOS, DECO_IDS, type DecoId, type Recipe } from '../game/decor';
+import {
+  BUILDINGS, BUILDING_IDS, PRODUCE, PRODUCE_IDS, isProduceReady, timeUntilProduce, type BuildingId,
+} from '../game/farm';
 import type { Want } from '../game/letters';
 import { MATERIAL_IDS, type MaterialId } from '../game/materials';
 import { SEASONS, daysUntilNextSeason, nextSeason, type Season } from '../game/seasons';
 import type { Game, Lang } from '../game/state';
 import { VISITOR_IDS } from '../game/visitors';
 import {
-  accessoryName, cropName, decoName, formatDate, formatDuration, getLang, materialName, onLangChange, seasonName, setLang, t, visitorName,
+  accessoryName, buildingName, cropName, decoName, formatDate, formatDuration, getLang, materialName, onLangChange, produceName,
+  seasonName, setLang, t, visitorName,
 } from '../i18n';
 import type { SceneHooks } from '../scenes/GardenScene';
 import { h, pixelImg } from './dom';
 import { edit } from './edit';
 
-type PanelKind = 'shop' | 'journal' | 'options' | 'dialog' | 'workshop' | 'letter' | 'name';
+type PanelKind = 'shop' | 'journal' | 'options' | 'dialog' | 'workshop' | 'letter' | 'name' | 'building';
 
 interface OpenPanel {
   kind: PanelKind;
@@ -89,7 +95,7 @@ export class Hud implements SceneHooks {
   private renderBottom(): void {
     const s = this.game.state;
     const owned = CROP_IDS.filter((id) => (s.seeds[id] ?? 0) > 0);
-    const basketCount = Object.values(s.basket).reduce((a, b) => a + (b ?? 0), 0);
+    const basketCount = [...Object.values(s.basket), ...Object.values(s.produce)].reduce((a: number, b) => a + (b ?? 0), 0);
 
     const seedBar = h('div', { class: 'seedbar', role: 'listbox', 'aria-label': t('hud.seeds') });
     if (owned.length === 0) {
@@ -259,23 +265,32 @@ export class Hud implements SceneHooks {
   }
 
   private shopSell(): HTMLElement[] {
-    const basket = this.game.state.basket;
-    const ids = CROP_IDS.filter((id) => (basket[id] ?? 0) > 0);
-    if (ids.length === 0) return [h('p', { class: 'empty-note' }, t('shop.emptyBasket'))];
-    const total = ids.reduce((sum, id) => sum + CROPS[id].sellPrice * (basket[id] ?? 0), 0);
+    const g = this.game;
+    const { basket, produce } = g.state;
+    // Les légumes du panier, puis les produits de la ferme : même carte, même geste.
+    const items = [
+      ...CROP_IDS.filter((id) => (basket[id] ?? 0) > 0).map((id) => ({
+        icon: cropIconUrl(id), name: cropName(id), n: basket[id] ?? 0, price: CROPS[id].sellPrice, sell: (q: number) => g.sell(id, q),
+      })),
+      ...PRODUCE_IDS.filter((id) => (produce[id] ?? 0) > 0).map((id) => ({
+        icon: produceIconUrl(id), name: produceName(id), n: produce[id] ?? 0, price: PRODUCE[id].sellPrice, sell: (q: number) => g.sellProduce(id, q),
+      })),
+    ];
+    if (items.length === 0) return [h('p', { class: 'empty-note' }, t('shop.emptyBasket'))];
+    const total = items.reduce((sum, it) => sum + it.price * it.n, 0);
     const sold = (earned: number) => this.toast(t('toast.sold', { n: earned }));
     return [
       h('div', { class: 'card-list' },
-        ...ids.map((id) =>
+        ...items.map((it) =>
           h('div', { class: 'card' },
-            pixelImg(cropIconUrl(id), 48),
+            pixelImg(it.icon, 48),
             h('div', { class: 'card-main' },
-              h('strong', {}, cropName(id)),
-              h('small', {}, t('shop.basketCount', { n: basket[id] ?? 0, price: CROPS[id].sellPrice })),
+              h('strong', {}, it.name),
+              h('small', {}, t('shop.basketCount', { n: it.n, price: it.price })),
             ),
             h('div', { class: 'card-actions' },
-              h('button', { class: 'btn', onclick: () => { const r = this.game.sell(id, 1); if (r.ok) sold(r.earned); } }, t('shop.sellOne')),
-              h('button', { class: 'btn', onclick: () => { const r = this.game.sell(id, Infinity); if (r.ok) sold(r.earned); } }, t('shop.sellAllOf', { n: basket[id] ?? 0 })),
+              h('button', { class: 'btn', onclick: () => { const r = it.sell(1); if (r.ok) sold(r.earned); } }, t('shop.sellOne')),
+              h('button', { class: 'btn', onclick: () => { const r = it.sell(Infinity); if (r.ok) sold(r.earned); } }, t('shop.sellAllOf', { n: it.n })),
             ),
           ),
         ),
@@ -314,6 +329,17 @@ export class Hud implements SceneHooks {
           h('div', { class: 'journal-grid' }, ...bySeason(season).map((id) => this.journalEntry(id))),
         ),
       ),
+      h('section', { class: 'journal-season' },
+        h('p', { class: 'section-title' }, t('journal.farm')),
+        h('div', { class: 'journal-grid' }, ...PRODUCE_IDS.map((id) => {
+          const entry = this.game.state.journal.produce[id];
+          return h('div', { class: `journal-entry${entry ? '' : ' unknown'}`, title: entry ? t('journal.firstOn', { date: formatDate(entry.firstAt) }) : null },
+            pixelImg(produceIconUrl(id), 48, entry ? '' : 'silhouette'),
+            h('strong', {}, entry ? produceName(id) : t('journal.unknown')),
+            entry ? h('small', {}, t('journal.collected', { n: entry.count })) : null,
+          );
+        })),
+      ),
     ];
   }
 
@@ -343,6 +369,7 @@ export class Hud implements SceneHooks {
         row(t('journal.stat.plots'), s.plots.filter((p) => p.tilled).length),
         row(t('journal.stat.forage'), s.journal.forageCount),
         row(t('journal.stat.letters'), s.journal.lettersDelivered),
+        row(t('journal.stat.animals'), BUILDING_IDS.reduce((n, id) => n + s.farm[id].animals, 0)),
         row(t('journal.stat.since'), formatDate(s.createdAt)),
       ),
     ];
@@ -460,8 +487,8 @@ export class Hud implements SceneHooks {
   }
 
   private wantChip(w: Want): HTMLElement {
-    const icon = w.kind === 'crop' ? cropIconUrl(w.id) : materialIconUrl(w.id);
-    const name = w.kind === 'crop' ? cropName(w.id) : materialName(w.id);
+    const icon = w.kind === 'crop' ? cropIconUrl(w.id) : w.kind === 'produce' ? produceIconUrl(w.id) : materialIconUrl(w.id);
+    const name = w.kind === 'crop' ? cropName(w.id) : w.kind === 'produce' ? produceName(w.id) : materialName(w.id);
     return h('span', { class: 'want' }, this.need(icon, name, this.game.have(w), w.n), h('small', {}, name));
   }
 
@@ -639,6 +666,76 @@ export class Hud implements SceneHooks {
         : t('edit.move')),
       h('button', { class: 'btn primary', onclick: () => this.finishEdit() }, t('edit.done')),
     );
+  }
+
+  // --- La ferme ---------------------------------------------------------------
+
+  /** La fiche d'un bâtiment : le rénover s'il est en ruine, sinon y accueillir un animal de plus. */
+  openBuilding(id: BuildingId): void {
+    this.openPanel('building', () => {
+      const g = this.game;
+      const b = g.state.farm[id];
+      const def = BUILDINGS[id];
+      const picture = pixelImg(buildingUrl(id, g.season, b.renovated), 96, 'building-img', 96 * (this.buildingRatio(id)));
+      if (!b.renovated) {
+        const can = g.missingFor(def.renovation).length === 0;
+        return [
+          this.header(buildingName(id)),
+          h('div', { class: 'companion-card' }, picture,
+            // Laisser découvrir : on décrit le bâtiment, pas ce qu'il deviendra.
+            h('div', { class: 'card-main' }, h('small', {}, t(`building.ruin.${id}`))),
+          ),
+          h('p', { class: 'section-title' }, t('farm.renovateNeeds')),
+          this.recipeChips(def.renovation),
+          h('div', { class: 'dialog-actions' },
+            h('button', { class: 'btn ghost', onclick: () => this.closePanel() }, t('common.cancel')),
+            h('button', {
+              class: 'btn primary', disabled: !can,
+              onclick: () => {
+                if (!g.renovate(id).ok) return;
+                this.closePanel();
+                this.toast(t(`farm.renovated.${id}`));
+              },
+            }, t('farm.renovate')),
+          ),
+        ];
+      }
+      const now = g.now();
+      const full = b.animals >= def.capacity;
+      const icons = Array.from({ length: def.capacity }, (_, k) =>
+        pixelImg(animalIconUrl(def.animal), def.animal === 'cow' ? 36 : 24, k < b.animals ? '' : 'faded', 24));
+      return [
+        this.header(buildingName(id)),
+        h('div', { class: 'companion-card' }, picture,
+          h('div', { class: 'card-main' },
+            h('small', {}, t(`building.hint.${id}`)),
+            h('div', { class: 'animals' }, ...icons),
+            h('small', { class: 'stock' }, isProduceReady(id, b)
+              ? t('farm.waiting', { name: produceName(def.produce) })
+              : t('farm.next', { name: produceName(def.produce), time: formatDuration(timeUntilProduce(id, b, now)) })),
+            h('small', {}, t('shop.sellPrice', { price: PRODUCE[def.produce].sellPrice })),
+          ),
+        ),
+        h('div', { class: 'card' },
+          pixelImg(animalIconUrl(def.animal), def.animal === 'cow' ? 72 : 48, '', 48),
+          h('div', { class: 'card-main' },
+            h('strong', {}, t(`farm.more.${def.animal}`)),
+            h('small', {}, full ? t(`farm.full.${def.animal}`) : t('farm.count', { n: b.animals, max: def.capacity })),
+          ),
+          h('div', { class: 'card-actions' },
+            h('button', {
+              class: 'btn primary', disabled: full || g.state.coins < def.animalPrice,
+              onclick: () => { if (g.adopt(id).ok) this.toast(t(`farm.adopted.${id}`)); },
+            }, t('farm.adopt'), h('span', { class: 'price' }, pixelImg(uiIconUrl('coin'), 16), def.animalPrice)),
+          ),
+        ),
+      ];
+    });
+  }
+
+  private buildingRatio(id: BuildingId): number {
+    const sizes: Record<BuildingId, number> = { coop: 28 / 30, hutch: 24 / 32, sheepfold: 38 / 48, barn: 44 / 56 };
+    return sizes[id];
   }
 
   // --- Options --------------------------------------------------------------

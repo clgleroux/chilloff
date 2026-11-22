@@ -545,6 +545,9 @@ img.empty-heart { filter: grayscale(1) brightness(1.6); opacity: 0.45; }
 .journal-entry.accessory.nope { animation: nope 0.35s ease-in-out; }
 @keyframes nope { 25% { transform: translateX(-4px); } 50% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
 
+.animals { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
+.building-img { flex: none; }
+
 /* --- Planche de sprites (?atlas) ------------------------------------------------ */
 
 body.atlas {

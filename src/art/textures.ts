@@ -11,6 +11,9 @@ import {
   type CorgiFrame, type PixelSprite,
 } from './living-sprites';
 import { UI_ICONS } from './sprites';
+import { ANIMAL_SPRITES, PRODUCE_SPRITES, SIGN_SPRITES, building, paddockFence } from './farm-art';
+import { BUILDING_IDS, type BuildingId } from '../game/farm';
+import { PADDOCKS } from '../game/world';
 
 function sprite(s: PixelSprite): HTMLCanvasElement {
   const p = new draw.Painter(s.rows[0].length, s.rows.length);
@@ -73,7 +76,17 @@ function buildAll(): CanvasMap {
     m.set(`fence_${s}`, draw.fenceTile(s));
     m.set(`cabin_${s}_day`, draw.cabin(s, false));
     m.set(`cabin_${s}_night`, draw.cabin(s, true));
+    for (const id of BUILDING_IDS) {
+      for (const ruined of [true, false]) {
+        const state = ruined ? 'ruin' : 'ok';
+        m.set(`farm_${id}_${s}_${state}`, building(id, s, ruined));
+        for (const part of ['back', 'front'] as const) m.set(`fence_${id}_${part}_${s}_${state}`, paddockFence(PADDOCKS[id], part, s, ruined));
+      }
+    }
   }
+  for (const [id, sp] of Object.entries(ANIMAL_SPRITES)) m.set(`animal_${id}`, sprite(sp));
+  for (const [id, sp] of Object.entries(PRODUCE_SPRITES)) m.set(`produce_${id}`, sprite(sp));
+  for (const [id, sp] of Object.entries(SIGN_SPRITES)) m.set(`sign_${id}`, sprite(sp));
   m.set('soil_dry', draw.soilTile(false));
   m.set('soil_wet', draw.soilTile(true));
   for (let v = 0; v < WILD_VARIANTS; v++) m.set(`wild_${v}`, draw.wildOverlay(v));
@@ -106,6 +119,9 @@ function buildAll(): CanvasMap {
   m.set('fx_heart', sprite(HEART));
   m.set('fx_glow', glow());
   m.set('fx_shadow', shadow());
+  const puff = new draw.Painter(8, 6);
+  puff.strings(['..www...', '.wwWww..', 'wwWWwww.', 'wWWWWwww', '.wwwwww.', '..ww.w..'], { w: '#f4ece0', W: '#ffffff' });
+  m.set('fx_puff', puff.canvas);
   m.set('fx_sparkle', draw.sparkle());
   m.set('fx_drop', draw.drop());
   m.set('fx_cursor', draw.cursor());
@@ -140,3 +156,6 @@ export const materialIconUrl = (id: string) => textureUrl(`mat_${id}`);
 export const decoIconUrl = (id: string) => textureUrl(`deco_${id}`);
 export const visitorIconUrl = (id: string) => textureUrl(`vis_${id}`);
 export const corgiUrl = (accessory: AccessoryId | null, frame: CorgiFrame = 'walkA') => textureUrl(`corgi_${accessory ?? 'none'}_${frame}`);
+export const produceIconUrl = (id: string) => textureUrl(`produce_${id}`);
+export const animalIconUrl = (id: string) => textureUrl(`animal_${id}`);
+export const buildingUrl = (id: BuildingId, season: string, renovated: boolean) => textureUrl(`farm_${id}_${season}_${renovated ? 'ok' : 'ruin'}`);

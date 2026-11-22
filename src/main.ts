@@ -31,6 +31,8 @@ function start(): void {
     pixelArt: true,
     roundPixels: true,
     scale: { mode: Phaser.Scale.RESIZE, width: '100%', height: '100%' },
+    // Un toucher sur l'interface (fermer un panneau…) ne doit pas atteindre le jardin en dessous.
+    input: { windowEvents: false },
     scene: [scene],
     banner: false,
   });
@@ -46,6 +48,7 @@ function start(): void {
   game.onEvent((e) => {
     if (e.type === 'seasonChanged') hud.toast(t(`season.arrived.${e.to}`));
     if (e.type === 'letterArrived') hud.toast(t('toast.letterArrived'));
+    if (e.type === 'produceReady' && Date.now() > mutedUntil) hud.toast(t(`farm.ready.${e.building}`));
     if (e.type === 'ripened' && Date.now() > mutedUntil) {
       ripeBuffer.push(e);
       if (ripeBuffer.length === 1) {

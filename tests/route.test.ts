@@ -81,3 +81,30 @@ describe('le jardinier', () => {
     expect(route({ x: 40, y: 120 }, { x: 160, y: 120 }, GARDENER_OBSTACLES)).toHaveLength(2);
   });
 });
+
+import { BUILDING_IDS } from '../src/game/farm';
+import { paddockGate } from '../src/game/world';
+
+describe('le jardinier va à la ferme', () => {
+  const free = (p: Point) =>
+    p.x >= WALK_AREA.x0 && p.x <= WALK_AREA.x1 && p.y >= WALK_AREA.y0 && p.y <= WALK_AREA.y1
+    && !GARDENER_OBSTACLES.some((r) => p.x > r.x0 && p.x < r.x1 && p.y > r.y0 && p.y < r.y1);
+  it('rejoint chaque enclos par l’allée, sans traverser les clôtures ni la cabane', () => {
+    for (const id of BUILDING_IDS) {
+      for (const from of [{ x: 58, y: 76 }, { x: 100, y: 190 }, { x: 20, y: 130 }]) {
+        const { at } = approach(paddockGate(id), from);
+        expect(free(at), `${id} depuis ${JSON.stringify(from)}`).toBe(true);
+        const path = route(from, at, GARDENER_OBSTACLES);
+        expect(path.at(-1)).toEqual(at);
+        let prev = from;
+        for (const p of path) {
+          for (let i = 0; i <= 40; i++) {
+            const x = prev.x + ((p.x - prev.x) * i) / 40, y = prev.y + ((p.y - prev.y) * i) / 40;
+            expect(GARDENER_OBSTACLES.some((r) => x > r.x0 && x < r.x1 && y > r.y0 && y < r.y1), `${id} : (${x}, ${y})`).toBe(false);
+          }
+          prev = p;
+        }
+      }
+    }
+  });
+});

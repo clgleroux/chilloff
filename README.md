@@ -46,6 +46,25 @@ Une seule action par toucher, décidée quand le jardinier arrive : sur une case
 sur la terre → planter la graine choisie, sur une plante → l'arroser, sur une plante mûre (qui scintille) → récolter.
 Trouvailles, visiteurs, boîte aux lettres, arbre et corgi se touchent aussi. S'il manque des pièces ou des graines, la suite de la file est oubliée.
 
+### La ferme
+
+Au bout du chemin, un panneau montre la ferme : quatre bâtiments en ruine (poulailler, clapier, bergerie, étable),
+qu'on rénove un par un avec des pièces et des matériaux de cueillette. Le jardinier y va à pied : sur téléphone, la caméra
+glisse vers la ferme quand il passe le panneau (et revient au jardin par le panneau d'en face) ; sur un écran assez large
+(ordinateur, téléphone à l'horizontale), le jardin et la ferme sont côte à côte.
+
+- **Rénover** : toucher un bâtiment en ruine ouvre sa fiche, avec le prix (80 à 500 pièces, plus brindilles et cailloux).
+  À la fin des travaux, un premier animal s'installe tout seul (le jeu ne le dit pas avant).
+- **Accueillir** d'autres animaux depuis la fiche du bâtiment : 4 poules, 4 lapins, 3 moutons, 3 vaches au maximum.
+- **Produire en temps réel** : œufs (40 min), laine angora (1 h 30), lait (2 h), laine (3 h), un par animal.
+  Comme une plante mûre, les produits attendent dans l'enclos (ils scintillent) : rien ne se perd.
+- **Nourrir = bonus**, comme l'arrosage : toucher l'enclos quand rien n'est prêt donne aux animaux le légume
+  le moins cher du panier ; ils produisent 2× plus vite pendant 4 h. Pas obligatoire, rien ne meurt.
+- Les produits se **vendent** à la boutique avec les légumes, et les voisins se mettent à en **demander dans leurs lettres**
+  une fois le bâtiment rénové. Le journal a une section « La ferme » (silhouettes jusqu'au premier ramassage).
+- Laisser découvrir : la fiche d'un bâtiment en ruine le décrit tel qu'il est (« des plumes traînent encore dans la paille »),
+  jamais ce qu'il deviendra ; le jeu ne parle ni du bonus du repas ni du premier animal offert.
+
 ## Principe de design : laisser découvrir
 
 Le jeu en dit le moins possible. Le joueur essaie, observe, se laisse porter, et découvre par lui-même
@@ -91,16 +110,19 @@ src/
     visitors.ts  visiteurs (saison, heure, déco qui les attire, cadeau)
     letters.ts   courrier des voisins
     companion.ts le corgi : amitié, accessoires, fouilles
-    world.ts     plan du jardin : où l'on peut poser, cueillir, recevoir des visiteurs
+    farm.ts      la ferme : bâtiments, rénovation, animaux, production en temps réel, repas
+    world.ts     plan du jardin et de la ferme : où l'on peut poser, cueillir, recevoir des visiteurs ; les enclos
     state.ts     état de la partie, actions du joueur, vie du jardin, sauvegarde
   art/         pixel art généré par code (aucune image à télécharger)
     sprites.ts   plantes et icônes dessinées en texte (1 caractère = 1 pixel)
     living-sprites.ts  trouvailles, décos, visiteurs, boîte aux lettres
+    farm-art.ts  bâtiments (en ruine / rénovés, par saison), clôtures, animaux, produits, panneaux
     draw.ts      décors procéduraux : herbe, terre, cabane, arbres… par saison
     textures.ts  enregistrement des textures pour Phaser et l'interface
   scenes/      GardenScene : le jardin, les interactions, les petits effets
                Gardener.ts : le jardinier (file de tâches, outils, repos, nuit dans la cabane)
-               Corgi.ts / route.ts : promenade du compagnon et trajets du jardinier (contourner la cabane, l'arbre…)
+               Corgi.ts / route.ts : promenade du compagnon et trajets du jardinier (contourner la cabane, l'arbre, les enclos…)
+               Farm.ts : la ferme (enclos, animaux qui se promènent, produits) ; la caméra jardin / ferme est dans GardenScene
   ui/          interface HTML : barres, boutique, atelier, courrier, journal, options, mode déco
   i18n/        traductions FR / EN
 scripts/
@@ -116,6 +138,8 @@ depuis la console (`chilloff.state`).
 
 - **Ajouter une culture** : une entrée dans `src/game/crops.ts` (choisir une forme existante : `root`, `leafy`, `bush`, `stake`, `flower`, `gourd`, `stalk`) et son nom dans `src/i18n/fr.ts` / `en.ts`.
 - **Changer le rythme** : durées et prix dans `crops.ts` ; arrosage, défrichage, fréquence des trouvailles, des visiteurs et du courrier dans `config.ts`.
+- **Régler la ferme** : prix de rénovation, prix et nombre d'animaux, temps de production dans `src/game/farm.ts` ;
+  prix de vente des produits dans `PRODUCE` ; plan des enclos dans `src/game/world.ts` (`PADDOCKS`).
 - **Ajouter une déco ou un visiteur** : une entrée dans `decor.ts` ou `visitors.ts`, son dessin dans `art/living-sprites.ts`, ses textes dans `i18n/`.
 - **Remplacer le pixel art** par un pack d'images : charger les images dans `GardenScene.preload()` avec les mêmes clés de texture que `textures.ts`.
 
@@ -127,5 +151,6 @@ depuis la console (`chilloff.state`).
 - [ ] **Croisements** : deux plantes voisines peuvent donner une variété rare
 - [x] **Un compagnon** (corgi) avec 5 accessoires débloqués par l'amitié
 - [x] **Un jardinier** qui se déplace pour faire chaque action
+- [x] **La ferme** : rénover poulailler, clapier, bergerie et étable ; poules, lapins, moutons et vaches
 - [ ] **Jalons du journal** qui débloquent de la déco
 - [ ] Objectif du jour, musique douce, déco de saison

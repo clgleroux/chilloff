@@ -1,6 +1,9 @@
 // La scène du jardin : décor, potager, jardin vivant (trouvailles, visiteurs, déco, courrier),
 // interactions au toucher/clic et petits effets. Chaque toucher confie une tâche au jardinier,
 // qui marche jusqu'à la chose avant d'agir (voir Gardener.ts).
+// La ferme (Farm.ts) prolonge le jardin vers la droite, au bout du chemin. Sur un écran assez large on voit
+// les deux côte à côte ; sinon (téléphone) la caméra montre l'un ou l'autre, et glisse quand le jardinier
+// passe le panneau au bout du chemin.
 
 import Phaser from 'phaser';
 import { BACKDROP, rng } from '../art/draw';
@@ -8,13 +11,17 @@ import { LEAF_BITS } from '../art/living-sprites';
 import { GRASS_VARIANTS, PATH_VARIANTS, TREE_VARIANTS, WILD_VARIANTS, registerTextures } from '../art/textures';
 import { PLOT_COLS, PLOT_ORIGIN, PLOT_ROWS, TILE, WORLD_COLS, WORLD_ROWS, tillCost } from '../game/config';
 import { DECOS } from '../game/decor';
+import type { BuildingId } from '../game/farm';
 import { growthStage, isRipe, isWet, timeUntilRipe } from '../game/growth';
 import type { Season } from '../game/seasons';
 import type { ForageItem, Game, GiftResult, PlacedDeco, VisitorInstance } from '../game/state';
-import { GARDEN_MAX_ROW, GARDEN_MIN_ROW, MAILBOX_TILE, TREE_POS, tileFoot } from '../game/world';
+import {
+  FARM_COLS, FARM_SIGN, FARM_X, GARDEN_MAX_ROW, GARDEN_MIN_ROW, GARDEN_SIGN, LANE_Y, MAILBOX_TILE, PATH_COLS, PATH_ROW, TREE_POS, tileFoot,
+} from '../game/world';
 import { cropName, formatDuration, giftLabel, materialName, t, visitorName } from '../i18n';
 import { edit } from '../ui/edit';
 import { Corgi } from './Corgi';
+import { Farm } from './Farm';
 import { Gardener, type Job, type Tool } from './Gardener';
 
 export interface SceneHooks {
@@ -25,10 +32,19 @@ export interface SceneHooks {
   openLetter(): void;
   /** Premier câlin : on choisit le nom du compagnon. */
   nameCompanion(): void;
+  /** La fiche d'un bâtiment de la ferme : le rénover, ou y accueillir un animal. */
+  openBuilding(id: BuildingId): void;
 }
+
+export type View = 'garden' | 'farm';
 
 const WORLD_W = WORLD_COLS * TILE;
 const WORLD_H = WORLD_ROWS * TILE;
+/** Le jardin et la ferme ensemble. */
+const FULL_COLS = WORLD_COLS + FARM_COLS;
+const FULL_W = FULL_COLS * TILE;
+/** Durée du glissement de la caméra entre le jardin et la ferme. */
+const PAN_MS = 700;
 /** Le décor déborde du monde jouable pour remplir les grands écrans. */
 const MARGIN_COLS = 14;
 const MARGIN_ROWS = 10;
@@ -82,6 +98,10 @@ export class GardenScene extends Phaser.Scene {
   private wateredHintShown = false;
   private corgi!: Corgi;
   private gardener!: Gardener;
+  private farm!: Farm;
+  /** Jardin et ferme côte à côte (écran large), ou l'un après l'autre. */
+  private wide = false;
+  view: View = 'garden';
 
   constructor(private garden: Game, private hooks: SceneHooks) {
     super('garden');
@@ -107,12 +127,25 @@ export class GardenScene extends Phaser.Scene {
       zzz: (x, y) => this.zzz(x, y),
     }, DEPTH_OBJECTS);
     this.gardener = new Gardener(this, this.garden, DEPTH_OBJECTS);
+    this.farm = new Farm(this, this.garden, {
+      ask: (job) => this.ask(job),
+      marker: (col, row) => this.marker(col, row),
+      toast: (m) => this.hooks.toast(m),
+      openBuilding: (id) => this.hooks.openBuilding(id),
+      pop: (img) => this.pop(img),
+      wiggle: (img) => this.wiggle(img),
+      flyIcon: (x, y, key) => this.flyIcon(x, y, key),
+      heart: (x, y) => this.heart(x, y),
+      zzz: (x, y) => this.zzz(x, y),
+      puff: (x, y) => this.puff(x, y),
+    }, { soil: DEPTH_SOIL, objects: DEPTH_OBJECTS, fx: DEPTH_FX });
+    this.buildSigns();
 
     this.editGrid = this.add.graphics().setDepth(DEPTH_EDIT_GRID);
     this.cursorImg = this.add.image(0, 0, 'fx_cursor').setOrigin(0, 0).setDepth(DEPTH_FX).setVisible(false);
     this.ghost = this.add.image(0, 0, 'deco_stepstone').setOrigin(0.5, 1).setAlpha(0.7).setDepth(DEPTH_FX).setVisible(false);
     this.nightOverlay = this.add
-      .rectangle(-MARGIN_COLS * TILE, -MARGIN_ROWS * TILE, WORLD_W + 2 * MARGIN_COLS * TILE, WORLD_H + 2 * MARGIN_ROWS * TILE, 0x1a1a4a, 0)
+      .rectangle(-MARGIN_COLS * TILE, -MARGIN_ROWS * TILE, FULL_W + 2 * MARGIN_COLS * TILE, WORLD_H + 2 * MARGIN_ROWS * TILE, 0x1a1a4a, 0)
       .setOrigin(0, 0)
       .setDepth(DEPTH_NIGHT);
 
@@ -135,6 +168,7 @@ export class GardenScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     this.corgi.update(Math.min(delta, 100));
     this.gardener.update(Math.min(delta, 100));
+    this.farm.update(Math.min(delta, 100));
   }
 
   // --- Construction du décor ------------------------------------------------
@@ -142,15 +176,15 @@ export class GardenScene extends Phaser.Scene {
   private buildGround(): void {
     const r = rng(42);
     for (let row = -MARGIN_ROWS; row < WORLD_ROWS + MARGIN_ROWS; row++) {
-      for (let col = -MARGIN_COLS; col < WORLD_COLS + MARGIN_COLS; col++) {
+      for (let col = -MARGIN_COLS; col < FULL_COLS + MARGIN_COLS; col++) {
         const v = r() < 0.12 ? 3 : Math.floor(r() * (GRASS_VARIANTS - 1));
         const img = this.add.image(col * TILE, row * TILE, `grass_${this.season}_${v}`).setOrigin(0, 0).setDepth(DEPTH_GROUND);
         this.seasonal.push({ img, key: (s) => `grass_${s}_${v}` });
       }
     }
-    // Chemin devant la cabane, qui longe le haut du potager.
-    for (let col = 2; col <= PLOT_ORIGIN.col + PLOT_COLS; col++) {
-      this.add.image(col * TILE, 4 * TILE, `path_${col % PATH_VARIANTS}`).setOrigin(0, 0).setDepth(DEPTH_GROUND + 0.5);
+    // Chemin devant la cabane, qui longe le haut du potager et file jusqu'au bout de la ferme (l'allée).
+    for (let col = PATH_COLS[0]; col < FULL_COLS; col++) {
+      this.add.image(col * TILE, PATH_ROW * TILE, `path_${col % PATH_VARIANTS}`).setOrigin(0, 0).setDepth(DEPTH_GROUND + 0.5);
     }
   }
 
@@ -186,8 +220,8 @@ export class GardenScene extends Phaser.Scene {
     this.addBush(0, 11 * TILE);
     this.addBush(11 * TILE, 11 * TILE);
 
-    // Clôture en bas du jardin.
-    for (let col = 0; col < WORLD_COLS; col++) {
+    // Clôture en bas du jardin et de la ferme.
+    for (let col = 0; col < FULL_COLS; col++) {
       const img = this.add.image(col * TILE, 12 * TILE, `fence_${this.season}`).setOrigin(0, 0);
       img.setDepth(DEPTH_OBJECTS + 13 * TILE);
       this.seasonal.push({ img, key: (s) => `fence_${s}` });
@@ -195,14 +229,14 @@ export class GardenScene extends Phaser.Scene {
 
     // Une rangée d'arbres en haut et en bas encadre le jardin (visible sur les écrans en hauteur)…
     const r = rng(7);
-    for (let x = -56; x <= WORLD_W + 56; x += 22 + Math.floor(r() * 8)) {
+    for (let x = -56; x <= FULL_W + 56; x += 22 + Math.floor(r() * 8)) {
       this.addTree(x, -4 + Math.floor(r() * 10), Math.floor(r() * TREE_VARIANTS));
       this.addTree(x + 11, WORLD_H + 34 + Math.floor(r() * 10), Math.floor(r() * TREE_VARIANTS));
     }
     // … et une forêt douce tout autour, pour les grands écrans.
     for (let row = -MARGIN_ROWS + 1; row < WORLD_ROWS + MARGIN_ROWS; row += 2) {
-      for (let col = -MARGIN_COLS; col < WORLD_COLS + MARGIN_COLS; col += 2) {
-        const inside = col >= -2 && col <= WORLD_COLS + 1 && row >= -4 && row <= WORLD_ROWS + 5;
+      for (let col = -MARGIN_COLS; col < FULL_COLS + MARGIN_COLS; col += 2) {
+        const inside = col >= -2 && col <= FULL_COLS + 1 && row >= -4 && row <= WORLD_ROWS + 5;
         if (inside || r() > 0.6) continue;
         const x = col * TILE + Math.floor(r() * 12), y = row * TILE + Math.floor(r() * 12);
         if (r() < 0.75) this.addTree(x, y, Math.floor(r() * TREE_VARIANTS));
@@ -244,15 +278,54 @@ export class GardenScene extends Phaser.Scene {
 
   // --- Mise à jour ----------------------------------------------------------
 
-  /** Taille d'écran : zoom entier pour des pixels nets, monde centré. */
+  /**
+   * Taille d'écran : zoom entier pour des pixels nets, monde centré. Si l'écran est assez large pour montrer
+   * le jardin et la ferme ensemble sans trop rapetisser (ordinateur, téléphone à l'horizontale), on montre
+   * les deux ; sinon, la vue en cours (le jardin ou la ferme).
+   */
   private layout(): void {
     const cam = this.cameras.main;
     const { width, height } = this.scale.gameSize;
     cam.setSize(width, height);
-    const fit = Math.min(width / WORLD_W, height / WORLD_H);
-    const zoom = fit >= 1 ? Math.floor(fit) : fit;
-    cam.setZoom(Math.max(0.25, zoom));
-    cam.centerOn(WORLD_W / 2, WORLD_H / 2);
+    const zoomFor = (w: number) => {
+      const fit = Math.min(width / w, height / WORLD_H);
+      return Math.max(0.25, fit >= 1 ? Math.floor(fit) : fit);
+    };
+    const single = zoomFor(WORLD_W), both = zoomFor(FULL_W);
+    this.wide = both >= 1 && both >= single * 0.7;
+    cam.setZoom(this.wide ? both : single);
+    cam.centerOn(this.viewCenterX(), WORLD_H / 2);
+  }
+
+  private viewCenterX(): number {
+    if (this.wide) return FULL_W / 2;
+    return this.view === 'garden' ? WORLD_W / 2 : FARM_X + (FARM_COLS * TILE) / 2;
+  }
+
+  /** Montrer le jardin ou la ferme (la caméra glisse ; rien ne bouge si les deux sont déjà visibles). */
+  showView(view: View, animate = true): void {
+    this.view = view;
+    const cam = this.cameras.main;
+    if (animate && !this.wide) cam.pan(this.viewCenterX(), WORLD_H / 2, PAN_MS, 'Sine.easeInOut', true);
+    else cam.centerOn(this.viewCenterX(), WORLD_H / 2);
+  }
+
+  /** Les panneaux au bout du chemin : le jardinier passe de l'un à l'autre, et la caméra le suit. */
+  private buildSigns(): void {
+    const go = (key: string, sign: { x: number }, view: View, then: { x: number; y: number }) => () => {
+      if (edit.active) return;
+      this.ask({
+        key, target: () => ({ x: sign.x, y: LANE_Y }),
+        act: () => {
+          this.showView(view);
+          this.ask({ key: `${key}:walk`, target: () => then, act: () => {} });
+        },
+      });
+    };
+    const toFarm = this.add.image(GARDEN_SIGN.x, GARDEN_SIGN.y, 'sign_toFarm').setOrigin(0.5, 1).setDepth(DEPTH_OBJECTS + GARDEN_SIGN.y);
+    toFarm.setInteractive({ useHandCursor: true }).on('pointerdown', go('sign:farm', GARDEN_SIGN, 'farm', { x: FARM_X + 40, y: LANE_Y }));
+    const toGarden = this.add.image(FARM_SIGN.x, FARM_SIGN.y, 'sign_toGarden').setOrigin(0.5, 1).setDepth(DEPTH_OBJECTS + FARM_SIGN.y);
+    toGarden.setInteractive({ useHandCursor: true }).on('pointerdown', go('sign:garden', FARM_SIGN, 'garden', { x: 150, y: LANE_Y }));
   }
 
   refresh(): void {
@@ -283,6 +356,7 @@ export class GardenScene extends Phaser.Scene {
     this.sync(this.decoViews, s.decor.placed, (d) => this.makeDeco(d));
     this.sync(this.visitorViews, s.visitors, (v) => this.makeVisitor(v));
 
+    this.farm.refresh();
     this.mailbox.setTexture(s.letter ? 'mailbox_up' : 'mailbox_down');
     this.updateBubble();
     if (edit.active) this.drawEditGrid();
@@ -307,6 +381,7 @@ export class GardenScene extends Phaser.Scene {
     for (const s of this.seasonal) s.img.setTexture(s.key(season));
     this.cabinImg.setTexture(`cabin_${season}_${this.night ? 'night' : 'day'}`);
     this.cameras.main.setBackgroundColor(BACKDROP[season]);
+    this.farm.setSeason(season);
   }
 
   /** Teinte selon l'heure réelle : aube et soir dorés, nuit bleutée avec fenêtres et lanternes allumées. */
@@ -437,6 +512,7 @@ export class GardenScene extends Phaser.Scene {
   private onEditChanged(): void {
     if (edit.active) {
       this.gardener.clear(true);
+      if (this.view !== 'garden') this.showView('garden', false); // la déco se pose dans le jardin
       this.drawEditGrid();
       if (edit.hand) this.ghost.setTexture(`deco_${edit.hand}`);
     } else {
@@ -544,12 +620,12 @@ export class GardenScene extends Phaser.Scene {
   // --- Le jardinier -------------------------------------------------------------
 
   /** Confie une tâche au jardinier (une même chose n'est demandée qu'une fois). */
-  private ask(job: Job): void {
+  ask(job: Job): void {
     this.gardener.add(job);
   }
 
   /** Petit repère au sol sur une case où le jardinier a quelque chose à faire. */
-  private marker(col: number, row: number): Phaser.GameObjects.Image {
+  marker(col: number, row: number): Phaser.GameObjects.Image {
     return this.add.image(col * TILE - 1, row * TILE - 1, 'fx_cursor').setOrigin(0, 0).setAlpha(0.45).setDepth(DEPTH_FX - 3);
   }
 
@@ -633,7 +709,7 @@ export class GardenScene extends Phaser.Scene {
 
   // --- Petits effets --------------------------------------------------------
 
-  private pop(img: Phaser.GameObjects.Image): void {
+  pop(img: Phaser.GameObjects.Image): void {
     this.tweens.killTweensOf(img);
     img.setScale(1, 0.6);
     this.tweens.add({ targets: img, scaleY: 1, scaleX: 1, duration: 260, ease: 'Back.easeOut' });
@@ -644,7 +720,7 @@ export class GardenScene extends Phaser.Scene {
     this.tweens.add({ targets: img, scale: 1, duration: 300, ease: 'Back.easeOut' });
   }
 
-  private wiggle(img: Phaser.GameObjects.Image): void {
+  wiggle(img: Phaser.GameObjects.Image): void {
     this.tweens.killTweensOf(img);
     img.setAngle(0);
     this.tweens.add({ targets: img, angle: { from: -6, to: 6 }, duration: 90, yoyo: true, repeat: 1, onComplete: () => img.setAngle(0) });
@@ -670,6 +746,12 @@ export class GardenScene extends Phaser.Scene {
         delay: k * 40, ease: 'Quad.easeIn', onComplete: () => d.destroy(),
       });
     }
+  }
+
+  /** Petit nuage de poussière (rénovation). */
+  puff(x: number, y: number): void {
+    const d = this.add.image(x, y, 'fx_puff').setDepth(DEPTH_FX).setScale(0.6);
+    this.tweens.add({ targets: d, y: y - 8, scale: 1.3, alpha: { from: 0.9, to: 0 }, duration: 600, ease: 'Quad.easeOut', onComplete: () => d.destroy() });
   }
 
   private dust(soil: Phaser.GameObjects.Image): void {
@@ -729,12 +811,12 @@ export class GardenScene extends Phaser.Scene {
     }
   }
 
-  private zzz(x: number, y: number): void {
+  zzz(x: number, y: number): void {
     const z = this.add.image(x, y, 'fx_zzz').setDepth(DEPTH_NIGHT + 2).setScale(0.6);
     this.tweens.add({ targets: z, x: x + 5, y: y - 10, scale: 1, alpha: { from: 1, to: 0 }, duration: 1600, onComplete: () => z.destroy() });
   }
 
-  private heart(x: number, y: number): void {
+  heart(x: number, y: number): void {
     const h = this.add.image(x, y, 'fx_heart').setDepth(DEPTH_FX);
     this.tweens.add({ targets: h, y: y - 12, alpha: { from: 1, to: 0 }, duration: 900, ease: 'Cubic.easeOut', onComplete: () => h.destroy() });
   }
@@ -747,7 +829,7 @@ export class GardenScene extends Phaser.Scene {
     keys.forEach((k, i) => this.time.delayedCall(i * 150, () => this.flyIcon(x + (i - (keys.length - 1) / 2) * 10, y, k)));
   }
 
-  private flyIcon(x: number, y: number, key: string): void {
+  flyIcon(x: number, y: number, key: string): void {
     const icon = this.add.image(x, y, key).setDepth(DEPTH_FX);
     this.tweens.add({
       targets: icon, y: y - 18, alpha: { from: 1, to: 0 }, scale: { from: 1, to: 1.2 },
