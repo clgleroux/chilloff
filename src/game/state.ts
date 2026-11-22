@@ -12,6 +12,10 @@ import {
 } from './companion';
 import { CROPS, CROP_IDS, cropsForSeason, isCropId, type CropId } from './crops';
 import { DECOS, isDecoId, type DecoId, type Recipe } from './decor';
+import {
+  BUILDINGS, BUILDING_IDS, PRODUCE, PRODUCE_IDS, FED_DURATION, advanceBuilding, isFed, isProduceId, isProduceReady, newBuilding,
+  type BuildingId, type BuildingState, type ProduceId,
+} from './farm';
 import { advancePlant, isRipe, type PlantState, type PlotTile } from './growth';
 import { CHARACTERS, makeLetter, type Letter, type Want } from './letters';
 import { forageTable, isMaterialId, type MaterialId } from './materials';
@@ -89,9 +93,14 @@ export interface GameState {
   treeShakeAt: number;
   nextUid: number;
   companion: CompanionState;
+  /** La ferme au bout du chemin : un état par bâtiment. */
+  farm: Record<BuildingId, BuildingState>;
+  /** Produits de la ferme ramassés, en attente d'être vendus ou donnés. */
+  produce: Partial<Record<ProduceId, number>>;
   journal: {
     crops: Partial<Record<CropId, JournalEntry>>;
     visitors: Partial<Record<VisitorId, JournalEntry>>;
+    produce: Partial<Record<ProduceId, JournalEntry>>;
     totalHarvests: number;
     coinsEarned: number;
     daysPlayed: number;
@@ -107,7 +116,8 @@ export interface GameState {
 export type FailReason =
   | 'notTilled' | 'occupied' | 'empty' | 'noSeedSelected' | 'noSeeds'
   | 'notRipe' | 'alreadyRipe' | 'alreadyWet' | 'alreadyTilled' | 'notEnoughCoins'
-  | 'outOfSeason' | 'nothingToSell' | 'notFound' | 'missingItems' | 'noLetter' | 'blocked';
+  | 'outOfSeason' | 'nothingToSell' | 'notFound' | 'missingItems' | 'noLetter' | 'blocked'
+  | 'notRenovated' | 'alreadyRenovated' | 'full' | 'alreadyFed' | 'nothingToEat';
 
 export type ActionResult<T = object> = ({ ok: true } & T) | { ok: false; reason: FailReason };
 
@@ -120,6 +130,7 @@ export interface GiftResult {
 export type GameEvent =
   | { type: 'seasonChanged'; from: Season; to: Season }
   | { type: 'ripened'; index: number; crop: CropId }
+  | { type: 'produceReady'; building: BuildingId }
   | { type: 'letterArrived' }
   | { type: 'letterReady' }
   | { type: 'newDay' };
@@ -136,6 +147,10 @@ const CORRUPT_KEY = 'chilloff.save.corrupt';
 
 export function plotIndex(col: number, row: number): number {
   return row * PLOT_COLS + col;
+}
+
+function newFarm(now: number): Record<BuildingId, BuildingState> {
+  return Object.fromEntries(BUILDING_IDS.map((id) => [id, newBuilding(now)])) as Record<BuildingId, BuildingState>;
 }
 
 function newCompanion(now: number): CompanionState {
@@ -175,8 +190,10 @@ export function createNewGame(now: number): GameState {
     treeShakeAt: 0,
     nextUid: 1,
     companion: newCompanion(now),
+    farm: newFarm(now),
+    produce: {},
     journal: {
-      crops: {}, visitors: {}, totalHarvests: 0, coinsEarned: 0, daysPlayed: 1,
+      crops: {}, visitors: {}, produce: {}, totalHarvests: 0, coinsEarned: 0, daysPlayed: 1,
       lastDay: dayKey(new Date(now)), forageCount: 0, lettersDelivered: 0,
     },
     settings: { lang: null },
@@ -231,6 +248,23 @@ function parseCompanion(c: any, now: number): CompanionState {
   };
 }
 
+function parseFarm(f: any, now: number): Record<BuildingId, BuildingState> {
+  const farm = newFarm(now);
+  if (!f || typeof f !== 'object') return farm;
+  for (const id of BUILDING_IDS) {
+    const b = f[id];
+    if (!b || typeof b !== 'object' || !b.renovated) continue;
+    farm[id] = {
+      renovated: true,
+      animals: Math.min(BUILDINGS[id].capacity, Math.max(1, Math.floor(num(b.animals, 1)))),
+      progress: Math.max(0, num(b.progress, 0)),
+      updatedAt: num(b.updatedAt, now),
+      fedUntil: num(b.fedUntil, 0),
+    };
+  }
+  return farm;
+}
+
 export function parseSave(raw: string, now: number): GameState | null {
   let data: any;
   try {
@@ -263,10 +297,15 @@ export function parseSave(raw: string, now: number): GameState | null {
     typeof col === 'number' && typeof row === 'number' && !isStaticBlocked(col, row) && !taken.has(`${col},${row}`);
 
   const placed: PlacedDeco[] = [];
+  const inventory = counts(data.decor?.inventory, isDecoId);
   for (const d of arr(data.decor?.placed)) {
     if (isDecoId(d?.id) && freeTile(d.col, d.row)) {
       placed.push({ uid: uid++, id: d.id, col: d.col, row: d.row });
       taken.add(`${d.col},${d.row}`);
+    } else if (isDecoId(d?.id)) {
+      // Sa case n'est plus libre (le chemin vers la ferme, par exemple) : la déco revient dans l'atelier.
+      const id: DecoId = d.id;
+      inventory[id] = (inventory[id] ?? 0) + 1;
     }
   }
   const forage: ForageItem[] = [];
@@ -291,7 +330,7 @@ export function parseSave(raw: string, now: number): GameState | null {
   if (l && CHARACTERS.includes(l.from) && typeof l.text === 'string' && Array.isArray(l.wants)) {
     const wants: Want[] = l.wants.filter((w: any) =>
       w && typeof w.n === 'number' && w.n > 0 &&
-      ((w.kind === 'crop' && isCropId(w.id)) || (w.kind === 'material' && isMaterialId(w.id))));
+      ((w.kind === 'crop' && isCropId(w.id)) || (w.kind === 'material' && isMaterialId(w.id)) || (w.kind === 'produce' && isProduceId(w.id))));
     if (wants.length) {
       letter = {
         id: num(l.id, 0), from: l.from, text: l.text, wants, arrivedAt: num(l.arrivedAt, now), read: !!l.read,
@@ -318,7 +357,7 @@ export function parseSave(raw: string, now: number): GameState | null {
     forage,
     // Une ancienne sauvegarde (v1) découvre le jardin vivant avec quelques trouvailles déjà là.
     nextForageAt: num(data.nextForageAt, base.nextForageAt),
-    decor: { placed, inventory: counts(data.decor?.inventory, isDecoId) },
+    decor: { placed, inventory },
     visitors,
     nextVisitorAt: num(data.nextVisitorAt, now),
     letter,
@@ -327,9 +366,12 @@ export function parseSave(raw: string, now: number): GameState | null {
     treeShakeAt: num(data.treeShakeAt, 0),
     nextUid: uid,
     companion: parseCompanion(data.companion, now),
+    farm: parseFarm(data.farm, now),
+    produce: counts(data.produce, isProduceId),
     journal: {
       crops: journalEntries(j.crops, isCropId, now),
       visitors: journalEntries(j.visitors, isVisitorId, now),
+      produce: journalEntries(j.produce, isProduceId, now),
       totalHarvests: Math.max(0, num(j.totalHarvests, 0)),
       coinsEarned: Math.max(0, num(j.coinsEarned, 0)),
       daysPlayed: Math.max(1, num(j.daysPlayed, 1)),
@@ -350,6 +392,7 @@ export class Game {
   private changeListeners = new Set<(s: GameState) => void>();
   private eventListeners = new Set<(e: GameEvent) => void>();
   private ripeKnown: boolean[];
+  private produceKnown: Partial<Record<BuildingId, boolean>> = {};
   private letterWasReady = false;
 
   constructor(
@@ -360,7 +403,12 @@ export class Game {
   ) {
     this.state = state;
     this.ripeKnown = state.plots.map((t) => !!t.plant && isRipe(t.plant));
+    this.rememberProduce();
     this.letterWasReady = this.canDeliver();
+  }
+
+  private rememberProduce(): void {
+    for (const id of BUILDING_IDS) this.produceKnown[id] = isProduceReady(id, this.state.farm[id]);
   }
 
   /** Charge la partie (ou en crée une) et calcule ce qui s'est passé pendant l'absence. */
@@ -395,6 +443,7 @@ export class Game {
 
     const readyCount = state.plots.filter((t) => t.plant && isRipe(t.plant)).length;
     game.ripeKnown = state.plots.map((t) => !!t.plant && isRipe(t.plant));
+    game.rememberProduce();
     game.save();
     return {
       game,
@@ -448,6 +497,12 @@ export class Game {
       }
       this.ripeKnown[i] = ripe;
     });
+    for (const id of BUILDING_IDS) {
+      advanceBuilding(this.state.farm[id], now);
+      const ready = isProduceReady(id, this.state.farm[id]);
+      if (ready && !this.produceKnown[id] && emit) this.emitEvent({ type: 'produceReady', building: id });
+      this.produceKnown[id] = ready;
+    }
   }
 
   private touchDay(now: number, emit: boolean): void {
@@ -587,7 +642,8 @@ export class Game {
 
     // Courrier
     if (!s.letter && now >= s.nextLetterAt) {
-      s.letter = makeLetter(s.lettersDone, this.season, this.random, now);
+      const produce = BUILDING_IDS.filter((id) => s.farm[id].renovated).map((id) => BUILDINGS[id].produce);
+      s.letter = makeLetter(s.lettersDone, this.season, this.random, now, produce);
       changed = true;
       if (emit) this.emitEvent({ type: 'letterArrived' });
     }
@@ -694,8 +750,25 @@ export class Game {
       const n = this.state.basket[id] ?? 0;
       if (n > 0) earned += CROPS[id].sellPrice * n;
     }
+    for (const id of PRODUCE_IDS) {
+      const n = this.state.produce[id] ?? 0;
+      if (n > 0) earned += PRODUCE[id].sellPrice * n;
+    }
     if (earned === 0) return { ok: false, reason: 'nothingToSell' };
     this.state.basket = {};
+    this.state.produce = {};
+    this.earn(earned);
+    this.commit();
+    return { ok: true, earned };
+  }
+
+  sellProduce(id: ProduceId, qty: number): ActionResult<{ earned: number }> {
+    const have = this.state.produce[id] ?? 0;
+    const n = Math.min(have, qty);
+    if (n <= 0) return { ok: false, reason: 'nothingToSell' };
+    const earned = PRODUCE[id].sellPrice * n;
+    this.state.produce[id] = have - n;
+    if (this.state.produce[id] === 0) delete this.state.produce[id];
     this.earn(earned);
     this.commit();
     return { ok: true, earned };
@@ -795,6 +868,14 @@ export class Game {
     const recipe = DECOS[id].recipe;
     const missing = this.missingFor(recipe);
     if (missing.length) return { ok: false, reason: missing[0].kind === 'coins' ? 'notEnoughCoins' : missing[0].kind === 'season' ? 'outOfSeason' : 'missingItems' };
+    this.pay(recipe);
+    const s = this.state;
+    s.decor.inventory[id] = (s.decor.inventory[id] ?? 0) + 1;
+    this.commit();
+    return { ok: true, deco: id };
+  }
+
+  private pay(recipe: Recipe): void {
     const s = this.state;
     for (const [m, n] of Object.entries(recipe.materials ?? {}) as Array<[MaterialId, number]>) {
       s.materials[m] = (s.materials[m] ?? 0) - n;
@@ -805,9 +886,6 @@ export class Game {
       if (!s.basket[c]) delete s.basket[c];
     }
     s.coins -= recipe.coins ?? 0;
-    s.decor.inventory[id] = (s.decor.inventory[id] ?? 0) + 1;
-    this.commit();
-    return { ok: true, deco: id };
   }
 
   /** Prend une déco de l'inventaire « en main » pour la poser. */
@@ -857,7 +935,9 @@ export class Game {
   // --- Courrier ---------------------------------------------------------------
 
   have(w: Want): number {
-    return w.kind === 'crop' ? this.state.basket[w.id] ?? 0 : this.state.materials[w.id] ?? 0;
+    if (w.kind === 'crop') return this.state.basket[w.id] ?? 0;
+    if (w.kind === 'produce') return this.state.produce[w.id] ?? 0;
+    return this.state.materials[w.id] ?? 0;
   }
 
   canDeliver(): boolean {
@@ -870,7 +950,7 @@ export class Game {
     if (!letter) return { ok: false, reason: 'noLetter' };
     if (!this.canDeliver()) return { ok: false, reason: 'missingItems' };
     for (const w of letter.wants) {
-      const bag: Partial<Record<string, number>> = w.kind === 'crop' ? s.basket : s.materials;
+      const bag: Partial<Record<string, number>> = w.kind === 'crop' ? s.basket : w.kind === 'produce' ? s.produce : s.materials;
       bag[w.id] = (bag[w.id] ?? 0) - w.n;
       if (!bag[w.id]) delete bag[w.id];
     }
@@ -901,6 +981,76 @@ export class Game {
     letter.read = true;
     this.letterWasReady = this.canDeliver();
     this.commit();
+  }
+
+  // --- Ferme -----------------------------------------------------------------
+
+  /** Rénover un bâtiment : le premier animal s'installe aussitôt. */
+  renovate(id: BuildingId): ActionResult {
+    const b = this.state.farm[id];
+    if (b.renovated) return { ok: false, reason: 'alreadyRenovated' };
+    const recipe = BUILDINGS[id].renovation;
+    const missing = this.missingFor(recipe);
+    if (missing.length) return { ok: false, reason: missing.some((m) => m.kind === 'coins') ? 'notEnoughCoins' : 'missingItems' };
+    this.pay(recipe);
+    const now = this.now();
+    this.state.farm[id] = { renovated: true, animals: 1, progress: 0, updatedAt: now, fedUntil: 0 };
+    this.commit();
+    return { ok: true };
+  }
+
+  adopt(id: BuildingId): ActionResult<{ animals: number }> {
+    const b = this.state.farm[id];
+    const def = BUILDINGS[id];
+    if (!b.renovated) return { ok: false, reason: 'notRenovated' };
+    if (b.animals >= def.capacity) return { ok: false, reason: 'full' };
+    if (this.state.coins < def.animalPrice) return { ok: false, reason: 'notEnoughCoins' };
+    advanceBuilding(b, this.now());
+    this.state.coins -= def.animalPrice;
+    b.animals += 1;
+    this.commit();
+    return { ok: true, animals: b.animals };
+  }
+
+  /** Ramasser les produits qui attendent (un par animal). */
+  collectProduce(id: BuildingId): ActionResult<{ produce: ProduceId; n: number; first: boolean }> {
+    const b = this.state.farm[id];
+    if (!b.renovated) return { ok: false, reason: 'notRenovated' };
+    advanceBuilding(b, this.now());
+    if (!isProduceReady(id, b)) return { ok: false, reason: 'notRipe' };
+    const produce = BUILDINGS[id].produce;
+    const n = b.animals;
+    b.progress = 0;
+    this.produceKnown[id] = false;
+    this.state.produce[produce] = (this.state.produce[produce] ?? 0) + n;
+    const journal = this.state.journal.produce;
+    const first = !journal[produce];
+    journal[produce] = { count: (journal[produce]?.count ?? 0) + n, firstAt: journal[produce]?.firstAt ?? this.now() };
+    this.commit();
+    return { ok: true, produce, n, first };
+  }
+
+  /** Ce que les animaux mangeraient maintenant : le légume le moins cher du panier. */
+  farmFood(): CropId | null {
+    const owned = CROP_IDS.filter((c) => (this.state.basket[c] ?? 0) > 0);
+    owned.sort((a, b) => CROPS[a].sellPrice - CROPS[b].sellPrice);
+    return owned[0] ?? null;
+  }
+
+  /** Donner un légume du panier aux animaux d'un bâtiment. */
+  feed(id: BuildingId): ActionResult<{ crop: CropId }> {
+    const b = this.state.farm[id];
+    if (!b.renovated) return { ok: false, reason: 'notRenovated' };
+    const now = this.now();
+    if (isFed(b, now)) return { ok: false, reason: 'alreadyFed' };
+    const crop = this.farmFood();
+    if (!crop) return { ok: false, reason: 'nothingToEat' };
+    advanceBuilding(b, now);
+    this.state.basket[crop]! -= 1;
+    if (!this.state.basket[crop]) delete this.state.basket[crop];
+    b.fedUntil = now + FED_DURATION;
+    this.commit();
+    return { ok: true, crop };
   }
 
   // --- Compagnon --------------------------------------------------------------
@@ -979,6 +1129,7 @@ export class Game {
     this.state = createNewGame(this.now());
     this.state.settings.lang = lang;
     this.ripeKnown = this.state.plots.map(() => false);
+    this.rememberProduce();
     this.updateWorld(this.now(), true, false);
     this.commit();
   }

@@ -28,11 +28,14 @@ async function idle() {
   await page.waitForTimeout(150);
 }
 
-/** Toucher un point du monde (pixels du jeu ; monde 192×208 centré, zoom entier), puis attendre le jardinier. */
-async function tapWorld(x, y, { wait = true } = {}) {
+/**
+ * Toucher un point du monde (pixels du jeu), puis attendre le jardinier. Sur téléphone, l'écran montre le jardin
+ * (192×208, centré, zoom entier) ou la ferme, juste à sa droite (`farm: true`).
+ */
+async function tapWorld(x, y, { wait = true, farm = false } = {}) {
   const box = await page.locator('#game canvas').boundingBox();
   const zoom = Math.max(1, Math.floor(Math.min(box.width / 192, box.height / 208)));
-  const ox = box.x + box.width / 2 - 96 * zoom, oy = box.y + box.height / 2 - 104 * zoom;
+  const ox = box.x + box.width / 2 - (farm ? 192 + 96 : 96) * zoom, oy = box.y + box.height / 2 - 104 * zoom;
   await page.touchscreen.tap(ox + x * zoom, oy + y * zoom);
   await page.waitForTimeout(wait ? 250 : 60);
   if (wait) await idle();
@@ -224,6 +227,60 @@ await page.locator('.close-btn').click();
 await page.waitForTimeout(250);
 step('compagnon : câlin et nom');
 
+// 12 bis. La ferme, au bout du chemin : le jardinier passe le panneau et la caméra glisse jusqu'à elle.
+await page.evaluate(() => {
+  const g = window.chilloff;
+  g.state.coins = 200; g.state.materials = { twig: 10, pebble: 10 }; g.state.basket = { beet: 1 };
+  g.selectSeed(g.state.selectedSeed);
+});
+await tapWorld(184, 56);
+assert.equal(await page.evaluate(() => window.chilloffScene.view), 'farm');
+assert.ok(await page.evaluate(() => window.chilloffScene.gardener.img.x) > 192, 'le jardinier est à la ferme');
+await page.waitForTimeout(800);
+step('ferme : le panneau mène à la ferme');
+
+// Le poulailler en ruine : sa fiche dit ce qu'il faut pour le rénover. Une poule s'installe.
+const FX = 192;
+await tapWorld(FX + 38, 40, { farm: true });
+await page.waitForTimeout(250);
+assert.match(await page.locator('.panel-building').innerText(), /Poulailler/);
+await page.locator('.panel-building .btn.primary').click();
+await page.waitForTimeout(300);
+s = await save();
+assert.deepEqual([s.farm.coop.renovated, s.farm.coop.animals, s.coins], [true, 1, 120]);
+await tapWorld(FX + 38, 40, { farm: true });
+await page.waitForTimeout(250);
+await page.locator('.panel-building .btn.primary').click();
+await page.locator('.close-btn').click();
+await page.waitForTimeout(250);
+s = await save();
+assert.equal(s.farm.coop.animals, 2);
+step('ferme : rénover le poulailler, accueillir une poule');
+
+// Toucher l'enclos : les poules mangent la betterave du panier ; plus tard, on ramasse les œufs.
+await tapWorld(FX + 72, 45, { farm: true });
+s = await save();
+assert.equal(s.basket.beet, undefined);
+assert.ok(s.farm.coop.fedUntil > now);
+assert.match(await page.locator('#toast-root').innerText(), /Betterave/);
+now += 25 * 60_000;
+await page.clock.setSystemTime(now);
+await page.waitForTimeout(1500);
+await tapWorld(FX + 72, 45, { farm: true });
+s = await save();
+assert.equal(s.produce.egg, 2);
+assert.equal(s.journal.produce.egg.count, 2);
+step('ferme : nourrir, ramasser les œufs');
+
+// Fermer un panneau ne touche pas ce qu'il y a dessous (ici, la grange en ruine).
+await page.locator('.shop-btn:not(.workshop-btn)').click();
+await page.waitForTimeout(300);
+assert.match(await page.locator('.panel-shop').innerText(), /Œuf/);
+await page.locator('.close-btn').click();
+await page.waitForTimeout(400);
+assert.equal(await page.evaluate(() => window.chilloffScene.gardener.busy), false);
+step('ferme : les œufs se vendent à la boutique');
+
 // 13. Recharger : tout est conservé
 const coinsBefore = s.coins;
 await page.reload();
@@ -232,6 +289,8 @@ await parkCorgi();
 assert.equal((await page.locator('.coin-count').innerText()).trim(), String(coinsBefore));
 assert.equal((await save()).decor.placed.length, 4);
 assert.equal((await save()).companion.name, 'Biscotte');
+assert.equal((await save()).farm.coop.animals, 2);
+assert.equal(await page.evaluate(() => window.chilloffScene.view), 'garden');
 step('sauvegarde après rechargement');
 
 // 14. Passer en anglais

@@ -74,7 +74,7 @@ export function rng(seed: number): () => number {
   };
 }
 
-function shade(hex: string, amount: number): string {
+export function shade(hex: string, amount: number): string {
   const n = parseInt(hex.slice(1), 16);
   const f = (v: number) => Math.max(0, Math.min(255, Math.round(v * (1 + amount))));
   const r = f((n >> 16) & 255), g = f((n >> 8) & 255), b = f(n & 255);

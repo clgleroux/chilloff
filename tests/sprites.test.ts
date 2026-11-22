@@ -76,3 +76,13 @@ describe('pixel art du jardinier', () => {
     for (const [k, s] of Object.entries(GARDENER_TOOLS)) checkSprite(`outil ${k}`, s, s.rows[0].length, s.rows.length);
   });
 });
+
+import { ANIMAL_SPRITES, PRODUCE_SPRITES, SIGN_SPRITES } from '../src/art/farm-art';
+
+describe('pixel art de la ferme', () => {
+  it('animaux 16×16 (la vache 24×16), produits 16×16, panneaux 16×24', () => {
+    for (const [k, s] of Object.entries(ANIMAL_SPRITES)) checkSprite(`animal ${k}`, s, k === 'cow' ? 24 : 16, 16);
+    for (const [k, s] of Object.entries(PRODUCE_SPRITES)) checkSprite(`produit ${k}`, s, 16, 16);
+    for (const [k, s] of Object.entries(SIGN_SPRITES)) checkSprite(`panneau ${k}`, s, 16, 24);
+  });
+});

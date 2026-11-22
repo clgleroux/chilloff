@@ -4,6 +4,7 @@ import { HOUR, MINUTE } from '../game/config';
 import type { CropId } from '../game/crops';
 import type { AccessoryId } from '../game/companion';
 import type { DecoId } from '../game/decor';
+import type { BuildingId, ProduceId } from '../game/farm';
 import type { MaterialId } from '../game/materials';
 import type { GiftResult, Lang } from '../game/state';
 import type { VisitorId } from '../game/visitors';
@@ -55,6 +56,8 @@ export const materialName = (id: MaterialId) => t(`material.${id}`);
 export const decoName = (id: DecoId) => t(`deco.${id}`);
 export const visitorName = (id: VisitorId) => t(`visitor.${id}`);
 export const accessoryName = (id: AccessoryId) => t(`accessory.${id}`);
+export const buildingName = (id: BuildingId) => t(`building.${id}`);
+export const produceName = (id: ProduceId) => t(`produce.${id}`);
 
 /** « +5 pièces · +2 Brindille » */
 export function giftLabel(g: GiftResult): string {

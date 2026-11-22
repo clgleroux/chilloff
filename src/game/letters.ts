@@ -2,13 +2,17 @@
 
 import { CROPS, cropsForSeason, type CropId } from './crops';
 import type { DecoId } from './decor';
+import { PRODUCE, type ProduceId } from './farm';
 import { MATERIALS, SEASONAL_MATERIAL, type MaterialId } from './materials';
 import type { Season } from './seasons';
 
 export type CharacterId = 'rose' | 'leon' | 'capucine' | 'basile';
 export const CHARACTERS: readonly CharacterId[] = ['rose', 'leon', 'capucine', 'basile'];
 
-export type Want = { kind: 'crop'; id: CropId; n: number } | { kind: 'material'; id: MaterialId; n: number };
+export type Want =
+  | { kind: 'crop'; id: CropId; n: number }
+  | { kind: 'material'; id: MaterialId; n: number }
+  | { kind: 'produce'; id: ProduceId; n: number };
 
 export interface LetterReward {
   coins: number;
@@ -39,14 +43,15 @@ function between(min: number, max: number, random: () => number): number {
 }
 
 function wantValue(w: Want): number {
-  return (w.kind === 'crop' ? CROPS[w.id].sellPrice : MATERIALS[w.id].value) * w.n;
+  const unit = w.kind === 'crop' ? CROPS[w.id].sellPrice : w.kind === 'produce' ? PRODUCE[w.id].sellPrice : MATERIALS[w.id].value;
+  return unit * w.n;
 }
 
 /**
  * Les trois premières lettres servent de tutoriel (cueillette → déco, récolte, matériaux de saison),
- * les suivantes sont tirées au hasard parmi ce que la saison permet.
+ * les suivantes sont tirées au hasard parmi ce que la saison permet (et ce que donne la ferme, une fois rénovée).
  */
-export function makeLetter(index: number, season: Season, random: () => number, now: number): Letter {
+export function makeLetter(index: number, season: Season, random: () => number, now: number, produce: readonly ProduceId[] = []): Letter {
   const seasonal = cropsForSeason(season).sort((a, b) => a.growTime - b.growTime);
   const special = SEASONAL_MATERIAL[season];
 
@@ -72,6 +77,7 @@ export function makeLetter(index: number, season: Season, random: () => number, 
     () => ({ kind: 'material', id: 'twig', n: between(2, 4, random) }),
     () => ({ kind: 'material', id: 'pebble', n: between(2, 4, random) }),
     () => ({ kind: 'material', id: special, n: between(1, 2, random) }),
+    ...produce.map((id): (() => Want) => () => ({ kind: 'produce', id, n: between(1, PRODUCE[id].sellPrice < 15 ? 4 : 2, random) })),
   ];
   const wants: Want[] = [];
   const count = random() < 0.6 ? 1 : 2;
