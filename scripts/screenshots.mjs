@@ -46,6 +46,13 @@ function demoSave(now, season) {
   ].map(([id, col, row], i) => ({ uid: 900 + i, id, col, row }));
   return {
     decor: { placed, inventory: { pond: 1, lantern: 1 } },
+    house: {
+      placed: [
+        ['painting', 2, 1], ['clock', 5, 1], ['bed', 0, 2], ['stove', 4, 2], ['bookshelf', 7, 2], ['armchair', 6, 4],
+        ['lamp', 7, 4], ['rug', 5, 5], ['table', 2, 5], ['chair', 1, 5], ['houseplant', 0, 7],
+      ].map(([id, col, row], i) => ({ uid: 950 + i, id, col, row })),
+      inventory: { chair: 1, lamp: 1 },
+    },
     materials: { twig: 5, pebble: 3, [seasonMat]: 2 },
     lettersDone: 3,
     farm: {
@@ -141,15 +148,34 @@ await shot(browser, 'mobile-letter', {
 });
 await shot(browser, 'mobile-workshop', {
   width: 390, height: 844, date: autumnDay, season: 'autumn',
-  action: async (p) => { await p.click('.workshop-btn'); await p.click('.panel-workshop .tab:first-child'); await p.waitForTimeout(400); },
+  path: '?debug',
+  action: async (p) => { await p.evaluate(() => window.chilloffScene.hooks.openWorkshop('furniture')); await p.waitForTimeout(400); },
 });
+await shot(browser, 'mobile-workshop-mine', {
+  width: 390, height: 844, date: autumnDay, season: 'autumn', path: '?debug',
+  action: async (p) => { await p.evaluate(() => window.chilloffScene.hooks.openWorkshop('mine')); await p.waitForTimeout(400); },
+});
+// La maison : le jardinier entre, la caméra montre l'intérieur. La nuit, il dort dans le lit et le corgi sur le tapis.
+const houseView = async (p) => {
+  await p.evaluate(() => window.chilloffScene.enterHouse());
+  await p.waitForFunction(() => window.chilloffScene.view === 'house', null, { timeout: 15_000 });
+  await p.waitForTimeout(900);
+};
+await shot(browser, 'mobile-house', { width: 390, height: 844, date: autumnDay, season: 'autumn', path: '?debug', action: houseView });
+await shot(browser, 'mobile-house-winter-night', { width: 390, height: 844, date: new Date(2026, 11, 20, 23, 0), season: 'winter', path: '?debug', action: houseView });
+await shot(browser, 'desktop-house', { width: 1440, height: 900, scale: 1, date: autumnDay, season: 'autumn', path: '?debug', action: houseView });
 await shot(browser, 'mobile-journal-visitors', {
   width: 390, height: 844, date: autumnDay, season: 'autumn',
   action: async (p) => { await p.click('.icon-btn[aria-label="Journal"]'); await p.click('.panel-journal .tab:nth-child(2)'); await p.waitForTimeout(400); },
 });
 await shot(browser, 'mobile-edit', {
   width: 390, height: 844, date: autumnDay, season: 'autumn',
-  action: async (p) => { await p.click('.workshop-btn'); await p.click('.panel-workshop .btn.primary'); await p.waitForTimeout(400); },
+  path: '?debug',
+  action: async (p) => {
+    await p.evaluate(() => window.chilloffScene.hooks.openWorkshop('mine'));
+    await p.click('.panel-workshop .btn.primary');
+    await p.waitForTimeout(400);
+  },
 });
 await shot(browser, 'mobile-name', {
   width: 390, height: 844, date: autumnDay, fresh: true, path: '?debug',

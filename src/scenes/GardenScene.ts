@@ -4,25 +4,31 @@
 // La ferme (Farm.ts) prolonge le jardin vers la droite, au bout du chemin. Sur un écran assez large on voit
 // les deux côte à côte ; sinon (téléphone) la caméra montre l'un ou l'autre, et glisse quand le jardinier
 // passe le panneau au bout du chemin.
+// La remise de l'atelier est à côté de la cabane : le jardinier y va, et l'atelier s'ouvre.
+// La cabane se visite : le jardinier entre, et la caméra montre l'intérieur à décorer (House.ts).
 
 import Phaser from 'phaser';
 import { BACKDROP, rng } from '../art/draw';
 import { LEAF_BITS } from '../art/living-sprites';
 import { GRASS_VARIANTS, PATH_VARIANTS, TREE_VARIANTS, WILD_VARIANTS, registerTextures } from '../art/textures';
 import { PLOT_COLS, PLOT_ORIGIN, PLOT_ROWS, TILE, WORLD_COLS, WORLD_ROWS, tillCost } from '../game/config';
-import { DECOS } from '../game/decor';
+import { DECO_IDS, DECOS } from '../game/decor';
+import { FURNITURE_IDS } from '../game/house';
 import type { BuildingId } from '../game/farm';
 import { growthStage, isRipe, isWet, timeUntilRipe } from '../game/growth';
 import type { Season } from '../game/seasons';
 import type { ForageItem, Game, GiftResult, PlacedDeco, VisitorInstance } from '../game/state';
 import {
-  FARM_COLS, FARM_SIGN, FARM_X, GARDEN_MAX_ROW, GARDEN_MIN_ROW, GARDEN_SIGN, LANE_Y, MAILBOX_TILE, PATH_COLS, PATH_ROW, TREE_POS, tileFoot,
+  FARM_COLS, FARM_SIGN, FARM_X, GARDEN_MAX_ROW, GARDEN_MIN_ROW, GARDEN_SIGN, LANE_Y, MAILBOX_TILE, PATH_COLS, PATH_ROW, TREE_POS,
+  WORKSHOP_DOOR, WORKSHOP_POS, tileFoot,
 } from '../game/world';
 import { cropName, formatDuration, giftLabel, materialName, t, visitorName } from '../i18n';
 import { edit } from '../ui/edit';
+import { indoor } from '../ui/indoor';
 import { Corgi } from './Corgi';
 import { Farm } from './Farm';
 import { Gardener, type Job, type Tool } from './Gardener';
+import { House, ROOM_H, ROOM_W } from './House';
 
 export interface SceneHooks {
   toast(message: string): void;
@@ -34,9 +40,11 @@ export interface SceneHooks {
   nameCompanion(): void;
   /** La fiche d'un bâtiment de la ferme : le rénover, ou y accueillir un animal. */
   openBuilding(id: BuildingId): void;
+  /** Le jardinier est arrivé à la remise : l'atelier s'ouvre. */
+  openWorkshop(): void;
 }
 
-export type View = 'garden' | 'farm';
+export type View = 'garden' | 'farm' | 'house';
 
 const WORLD_W = WORLD_COLS * TILE;
 const WORLD_H = WORLD_ROWS * TILE;
@@ -52,6 +60,8 @@ const MARGIN_ROWS = 10;
 const DEPTH_GROUND = 0;
 const DEPTH_SOIL = 1;
 const DEPTH_EDIT_GRID = 2;
+/** Durée du fondu quand on entre dans la maison ou qu'on en sort. */
+const FADE_MS = 220;
 const DEPTH_OBJECTS = 10; // + y du pied de l'objet
 const DEPTH_PERCHED = DEPTH_OBJECTS + 2000;
 const DEPTH_FX = 5000;
@@ -84,6 +94,8 @@ export class GardenScene extends Phaser.Scene {
   private decoViews = new Map<number, ThingView>();
   private visitorViews = new Map<number, ThingView>();
   private cabinImg!: Phaser.GameObjects.Image;
+  private workshopImg!: Phaser.GameObjects.Image;
+  private workshopSparkle!: Phaser.GameObjects.Image;
   private mainTree!: Phaser.GameObjects.Image;
   private mailbox!: Phaser.GameObjects.Image;
   private letterBubble!: Phaser.GameObjects.Image;
@@ -99,6 +111,7 @@ export class GardenScene extends Phaser.Scene {
   private corgi!: Corgi;
   private gardener!: Gardener;
   private farm!: Farm;
+  private house!: House;
   /** Jardin et ferme côte à côte (écran large), ou l'un après l'autre. */
   private wide = false;
   view: View = 'garden';
@@ -140,6 +153,13 @@ export class GardenScene extends Phaser.Scene {
       puff: (x, y) => this.puff(x, y),
     }, { soil: DEPTH_SOIL, objects: DEPTH_OBJECTS, fx: DEPTH_FX });
     this.buildSigns();
+    this.house = new House(this, this.garden, {
+      toast: (m) => this.hooks.toast(m),
+      pop: (img) => this.pop(img),
+      wiggle: (img) => this.wiggle(img),
+      zzz: (x, y) => this.zzz(x, y),
+      leave: () => indoor.leave(this.garden),
+    }, { ground: DEPTH_GROUND, soil: DEPTH_SOIL, grid: DEPTH_EDIT_GRID, objects: DEPTH_OBJECTS, fx: DEPTH_FX, light: DEPTH_LIGHT });
 
     this.editGrid = this.add.graphics().setDepth(DEPTH_EDIT_GRID);
     this.cursorImg = this.add.image(0, 0, 'fx_cursor').setOrigin(0, 0).setDepth(DEPTH_FX).setVisible(false);
@@ -161,6 +181,7 @@ export class GardenScene extends Phaser.Scene {
 
     this.garden.onChange(() => this.refresh());
     edit.on(() => this.onEditChanged());
+    indoor.on(() => { if (!indoor.active && this.view === 'house') this.leaveHouse(); });
     this.time.addEvent({ delay: 1000, loop: true, callback: () => this.refresh() });
     this.time.addEvent({ delay: 30_000, loop: true, callback: () => this.updateTimeOfDay() });
   }
@@ -192,6 +213,22 @@ export class GardenScene extends Phaser.Scene {
     // Cabane en haut à gauche : sa porte donne sur le chemin.
     this.cabinImg = this.add.image(TILE, 4 * TILE, `cabin_${this.season}_day`).setOrigin(0, 1);
     this.cabinImg.setDepth(DEPTH_OBJECTS + 4 * TILE);
+    // On entre dans la cabane pour la décorer (le toit et la cheminée ne comptent pas).
+    this.cabinImg.setInteractive({ hitArea: new Phaser.Geom.Rectangle(4, 16, 40, 28), hitAreaCallback: Phaser.Geom.Rectangle.Contains, useHandCursor: true })
+      .on('pointerdown', () => { if (!edit.active && this.view !== 'house') this.enterHouse(); });
+
+    // La remise de l'atelier, entre la boîte aux lettres et l'arbre : le jardinier y va, et l'atelier s'ouvre.
+    this.workshopImg = this.add.image(WORKSHOP_POS.x, WORKSHOP_POS.footY, `workshop_${this.season}`).setOrigin(0, 1);
+    this.workshopImg.setDepth(DEPTH_OBJECTS + WORKSHOP_POS.footY);
+    this.seasonal.push({ img: this.workshopImg, key: (s) => `workshop_${s}` });
+    this.workshopImg.setInteractive({ hitArea: new Phaser.Geom.Rectangle(2, 6, 44, 32), hitAreaCallback: Phaser.Geom.Rectangle.Contains, useHandCursor: true })
+      .on('pointerdown', () => {
+        if (edit.active) return;
+        this.ask({ key: 'workshop', target: () => WORKSHOP_DOOR, act: () => { this.wiggle(this.workshopImg); this.hooks.openWorkshop(); } });
+      });
+    // Une étincelle à la fenêtre quand il y a de quoi fabriquer quelque chose.
+    this.workshopSparkle = this.add.image(WORKSHOP_POS.x + 38, WORKSHOP_POS.footY - 18, 'fx_sparkle').setDepth(DEPTH_FX - 1).setVisible(false);
+    this.tweens.add({ targets: this.workshopSparkle, alpha: { from: 1, to: 0.2 }, scale: { from: 1, to: 0.6 }, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 
     // Boîte aux lettres à côté de la porte, avec une bulle quand une lettre attend.
     const mb = tileFoot(MAILBOX_TILE.col, MAILBOX_TILE.row);
@@ -291,6 +328,13 @@ export class GardenScene extends Phaser.Scene {
       const fit = Math.min(width / w, height / WORLD_H);
       return Math.max(0.25, fit >= 1 ? Math.floor(fit) : fit);
     };
+    if (this.view === 'house') {
+      // La pièce seule, assez grande, avec de la place pour les barres du haut et du bas.
+      const fit = Math.min(width / (ROOM_W + 2), height / (ROOM_H + 56));
+      cam.setZoom(Math.max(0.25, fit >= 1 ? Math.min(5, Math.floor(fit)) : fit));
+      cam.centerOn(this.house.center.x, this.house.center.y);
+      return;
+    }
     const single = zoomFor(WORLD_W), both = zoomFor(FULL_W);
     this.wide = both >= 1 && both >= single * 0.7;
     cam.setZoom(this.wide ? both : single);
@@ -304,6 +348,7 @@ export class GardenScene extends Phaser.Scene {
 
   /** Montrer le jardin ou la ferme (la caméra glisse ; rien ne bouge si les deux sont déjà visibles). */
   showView(view: View, animate = true): void {
+    if (this.view === 'house') return; // on sort de la maison par sa porte
     this.view = view;
     const cam = this.cameras.main;
     if (animate && !this.wide) cam.pan(this.viewCenterX(), WORLD_H / 2, PAN_MS, 'Sine.easeInOut', true);
@@ -357,6 +402,8 @@ export class GardenScene extends Phaser.Scene {
     this.sync(this.visitorViews, s.visitors, (v) => this.makeVisitor(v));
 
     this.farm.refresh();
+    this.house.refresh();
+    this.workshopSparkle.setVisible(!edit.active && [...DECO_IDS, ...FURNITURE_IDS].some((id) => this.garden.canCraft(id)));
     this.mailbox.setTexture(s.letter ? 'mailbox_up' : 'mailbox_down');
     this.updateBubble();
     if (edit.active) this.drawEditGrid();
@@ -382,6 +429,7 @@ export class GardenScene extends Phaser.Scene {
     this.cabinImg.setTexture(`cabin_${season}_${this.night ? 'night' : 'day'}`);
     this.cameras.main.setBackgroundColor(BACKDROP[season]);
     this.farm.setSeason(season);
+    this.house.setSeason(season);
   }
 
   /** Teinte selon l'heure réelle : aube et soir dorés, nuit bleutée avec fenêtres et lanternes allumées. */
@@ -396,6 +444,35 @@ export class GardenScene extends Phaser.Scene {
     this.night = h >= 19 || h < 7;
     this.cabinImg.setTexture(`cabin_${this.season}_${this.night ? 'night' : 'day'}`);
     for (const v of this.decoViews.values()) v.glow?.setAlpha(this.lightLevel * 0.9);
+    this.house?.setTime(this.night, this.lightLevel);
+  }
+
+  // --- La maison ---------------------------------------------------------------
+
+  /** Le jardinier rentre dans la cabane, puis la caméra montre l'intérieur. */
+  private enterHouse(): void {
+    this.gardener.enterHouse(() => {
+      this.cameras.main.fadeOut(FADE_MS, 42, 29, 23);
+      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+        this.view = 'house';
+        this.cursorImg.setVisible(false);
+        this.house.refresh();
+        indoor.enter();
+        this.layout();
+        this.cameras.main.fadeIn(FADE_MS, 42, 29, 23);
+      });
+    });
+  }
+
+  /** Retour au jardin : le jardinier ressort sur le seuil. */
+  private leaveHouse(): void {
+    this.cameras.main.fadeOut(FADE_MS, 42, 29, 23);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.view = 'garden';
+      this.layout();
+      this.gardener.leaveHouse();
+      this.cameras.main.fadeIn(FADE_MS, 42, 29, 23);
+    });
   }
 
   // --- Trouvailles, déco, visiteurs -------------------------------------------
@@ -585,6 +662,11 @@ export class GardenScene extends Phaser.Scene {
 
   private onPointerMove(p: Phaser.Input.Pointer): void {
     if (p.wasTouch) return;
+    if (this.view === 'house') {
+      const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+      this.house.hover(wp.x, wp.y);
+      return;
+    }
     if (edit.active) {
       const { col, row } = this.tileAt(p);
       const inGarden = col >= 0 && col < WORLD_COLS && row >= GARDEN_MIN_ROW && row <= GARDEN_MAX_ROW;
@@ -604,6 +686,11 @@ export class GardenScene extends Phaser.Scene {
   }
 
   private onPointerDown(p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]): void {
+    if (this.view === 'house') {
+      const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+      if (indoor.active) this.house.tap(wp.x, wp.y);
+      return;
+    }
     if (edit.active) {
       const { col, row } = this.tileAt(p);
       this.onEditTap(col, row);

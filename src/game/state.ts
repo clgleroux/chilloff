@@ -17,6 +17,7 @@ import {
   type BuildingId, type BuildingState, type ProduceId,
 } from './farm';
 import { advancePlant, isRipe, type PlantState, type PlotTile } from './growth';
+import { FURNITURE, isFurnitureId, roomSpotFits, type FurnitureId } from './house';
 import { CHARACTERS, makeLetter, type Letter, type Want } from './letters';
 import { forageTable, isMaterialId, type MaterialId } from './materials';
 import { SEASONS, dayKey, getSeason, isNight, type Season } from './seasons';
@@ -43,6 +44,17 @@ export interface PlacedDeco {
   col: number;
   row: number;
 }
+
+/** Un meuble posé dans la maison (case dans le repère de la pièce). */
+export interface PlacedFurniture {
+  uid: number;
+  id: FurnitureId;
+  col: number;
+  row: number;
+}
+
+/** Ce qui se fabrique et se démonte à l'atelier : une déco du jardin ou un meuble de la maison. */
+export type CraftId = DecoId | FurnitureId;
 
 export interface VisitorInstance {
   uid: number;
@@ -85,6 +97,8 @@ export interface GameState {
   forage: ForageItem[];
   nextForageAt: number;
   decor: { placed: PlacedDeco[]; inventory: Partial<Record<DecoId, number>> };
+  /** L'intérieur de la maison : meubles posés et meubles fabriqués pas encore posés. */
+  house: { placed: PlacedFurniture[]; inventory: Partial<Record<FurnitureId, number>> };
   visitors: VisitorInstance[];
   nextVisitorAt: number;
   letter: Letter | null;
@@ -182,6 +196,7 @@ export function createNewGame(now: number): GameState {
     // Dans le passé : quelques trouvailles attendent déjà dans l'herbe au premier lancement.
     nextForageAt: now - FORAGE_AT_START * FORAGE_INTERVAL[1],
     decor: { placed: [], inventory: {} },
+    house: { placed: [], inventory: {} },
     visitors: [],
     nextVisitorAt: now,
     letter: null,
@@ -308,6 +323,21 @@ export function parseSave(raw: string, now: number): GameState | null {
       inventory[id] = (inventory[id] ?? 0) + 1;
     }
   }
+  const furniture: PlacedFurniture[] = [];
+  const furnitureStock = counts(data.house?.inventory, isFurnitureId);
+  const roomTaken = new Set<string>();
+  for (const d of arr(data.house?.placed)) {
+    if (!isFurnitureId(d?.id)) continue;
+    const id: FurnitureId = d.id;
+    const ok = typeof d.col === 'number' && typeof d.row === 'number'
+      && roomSpotFits(FURNITURE[id].spot, d.col, d.row) && !roomTaken.has(`${d.col},${d.row}`);
+    if (ok) {
+      furniture.push({ uid: uid++, id, col: d.col, row: d.row });
+      roomTaken.add(`${d.col},${d.row}`);
+    } else {
+      furnitureStock[id] = (furnitureStock[id] ?? 0) + 1; // plus de place : le meuble attend à l'atelier
+    }
+  }
   const forage: ForageItem[] = [];
   for (const f of arr(data.forage)) {
     if (isMaterialId(f?.id) && freeTile(f.col, f.row)) {
@@ -358,6 +388,7 @@ export function parseSave(raw: string, now: number): GameState | null {
     // Une ancienne sauvegarde (v1) découvre le jardin vivant avec quelques trouvailles déjà là.
     nextForageAt: num(data.nextForageAt, base.nextForageAt),
     decor: { placed, inventory },
+    house: { placed: furniture, inventory: furnitureStock },
     visitors,
     nextVisitorAt: num(data.nextVisitorAt, now),
     letter,
@@ -844,9 +875,9 @@ export class Game {
   // --- Atelier et déco ----------------------------------------------------------
 
   /** Ce qui manque pour une recette (vide = on peut fabriquer). */
-  missingFor(recipe: Recipe): Array<{ kind: 'material' | 'crop' | 'coins' | 'season'; id?: string; missing: number }> {
+  missingFor(recipe: Recipe): Array<{ kind: 'material' | 'crop' | 'produce' | 'coins' | 'season'; id?: string; missing: number }> {
     const s = this.state;
-    const out: Array<{ kind: 'material' | 'crop' | 'coins' | 'season'; id?: string; missing: number }> = [];
+    const out: Array<{ kind: 'material' | 'crop' | 'produce' | 'coins' | 'season'; id?: string; missing: number }> = [];
     for (const [id, n] of Object.entries(recipe.materials ?? {}) as Array<[MaterialId, number]>) {
       const have = s.materials[id] ?? 0;
       if (have < n) out.push({ kind: 'material', id, missing: n - have });
@@ -855,24 +886,58 @@ export class Game {
       const have = s.basket[id] ?? 0;
       if (have < n) out.push({ kind: 'crop', id, missing: n - have });
     }
+    for (const [id, n] of Object.entries(recipe.produce ?? {}) as Array<[ProduceId, number]>) {
+      const have = s.produce[id] ?? 0;
+      if (have < n) out.push({ kind: 'produce', id, missing: n - have });
+    }
     if ((recipe.coins ?? 0) > s.coins) out.push({ kind: 'coins', missing: (recipe.coins ?? 0) - s.coins });
     if (recipe.season && recipe.season !== this.season) out.push({ kind: 'season', id: recipe.season, missing: 1 });
     return out;
   }
 
-  canCraft(id: DecoId): boolean {
-    return this.missingFor(DECOS[id].recipe).length === 0;
+  /** La recette d'une déco ou d'un meuble. */
+  recipeOf(id: CraftId): Recipe {
+    return isFurnitureId(id) ? FURNITURE[id].recipe : DECOS[id].recipe;
   }
 
-  craft(id: DecoId): ActionResult<{ deco: DecoId }> {
-    const recipe = DECOS[id].recipe;
+  /** Le stock (fabriqué, pas encore posé) d'une déco ou d'un meuble. */
+  stockOf(id: CraftId): number {
+    return (isFurnitureId(id) ? this.state.house.inventory[id] : this.state.decor.inventory[id]) ?? 0;
+  }
+
+  private addStock(id: CraftId, n: number): void {
+    const inv: Partial<Record<CraftId, number>> = isFurnitureId(id) ? this.state.house.inventory : this.state.decor.inventory;
+    inv[id] = (inv[id] ?? 0) + n;
+    if (!inv[id]) delete inv[id];
+  }
+
+  canCraft(id: CraftId): boolean {
+    return this.missingFor(this.recipeOf(id)).length === 0;
+  }
+
+  craft<T extends CraftId>(id: T): ActionResult<{ item: T }> {
+    const recipe = this.recipeOf(id);
     const missing = this.missingFor(recipe);
     if (missing.length) return { ok: false, reason: missing[0].kind === 'coins' ? 'notEnoughCoins' : missing[0].kind === 'season' ? 'outOfSeason' : 'missingItems' };
     this.pay(recipe);
-    const s = this.state;
-    s.decor.inventory[id] = (s.decor.inventory[id] ?? 0) + 1;
+    this.addStock(id, 1);
     this.commit();
-    return { ok: true, deco: id };
+    return { ok: true, item: id };
+  }
+
+  /** Ce que rend le démontage : tous les matériaux de cueillette de la recette (ni pièces, ni légumes, ni produits). */
+  salvageOf(id: CraftId): Partial<Record<MaterialId, number>> {
+    return { ...(this.recipeOf(id).materials ?? {}) };
+  }
+
+  /** Démonte une déco ou un meuble pas encore posé : on récupère ses matériaux. */
+  dismantle(id: CraftId): ActionResult<{ materials: Partial<Record<MaterialId, number>> }> {
+    if (this.stockOf(id) <= 0) return { ok: false, reason: 'notFound' };
+    this.addStock(id, -1);
+    const materials = this.salvageOf(id);
+    for (const [m, n] of Object.entries(materials) as Array<[MaterialId, number]>) this.addMaterial(m, n);
+    this.commit();
+    return { ok: true, materials };
   }
 
   private pay(recipe: Recipe): void {
@@ -884,6 +949,10 @@ export class Game {
     for (const [c, n] of Object.entries(recipe.crops ?? {}) as Array<[CropId, number]>) {
       s.basket[c] = (s.basket[c] ?? 0) - n;
       if (!s.basket[c]) delete s.basket[c];
+    }
+    for (const [p, n] of Object.entries(recipe.produce ?? {}) as Array<[ProduceId, number]>) {
+      s.produce[p] = (s.produce[p] ?? 0) - n;
+      if (!s.produce[p]) delete s.produce[p];
     }
     s.coins -= recipe.coins ?? 0;
   }
@@ -928,6 +997,47 @@ export class Game {
     const [d] = placed.splice(i, 1);
     // Un oiseau perché sur ce nichoir s'envole.
     this.state.visitors = this.state.visitors.filter((v) => !(v.perch && v.col === col && v.row === row));
+    this.commit();
+    return d.id;
+  }
+
+  // --- La maison ---------------------------------------------------------------
+
+  furnitureAt(col: number, row: number): PlacedFurniture | undefined {
+    return this.state.house.placed.find((d) => d.col === col && d.row === row);
+  }
+
+  canPlaceFurniture(id: FurnitureId, col: number, row: number): boolean {
+    return roomSpotFits(FURNITURE[id].spot, col, row) && !this.furnitureAt(col, row);
+  }
+
+  /** Prend un meuble du stock « en main » pour le poser. */
+  takeFurniture(id: FurnitureId): boolean {
+    if (!this.state.house.inventory[id]) return false;
+    this.addStock(id, -1);
+    this.commit();
+    return true;
+  }
+
+  returnFurniture(id: FurnitureId): void {
+    this.addStock(id, 1);
+    this.commit();
+  }
+
+  placeFurniture(id: FurnitureId, col: number, row: number): ActionResult<{ uid: number }> {
+    if (!this.canPlaceFurniture(id, col, row)) return { ok: false, reason: 'blocked' };
+    const uid = this.state.nextUid++;
+    this.state.house.placed.push({ uid, id, col, row });
+    this.commit();
+    return { ok: true, uid };
+  }
+
+  /** Retire un meuble posé (il passe « en main »). */
+  pickUpFurniture(col: number, row: number): FurnitureId | null {
+    const placed = this.state.house.placed;
+    const i = placed.findIndex((d) => d.col === col && d.row === row);
+    if (i < 0) return null;
+    const [d] = placed.splice(i, 1);
     this.commit();
     return d.id;
   }

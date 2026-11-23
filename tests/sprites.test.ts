@@ -30,6 +30,8 @@ describe('pixel art', () => {
 });
 
 import { DECOS } from '../src/game/decor';
+import { FURNITURE, type FurnitureId } from '../src/game/house';
+import { BED_SLEEP, FURNITURE_SPRITES } from '../src/art/house-art';
 import { DECO_SPRITES, EXTRA_UI_ICONS, HEART, MAILBOX_SPRITES, MATERIAL_SPRITES, VISITOR_SPRITES, type PixelSprite } from '../src/art/living-sprites';
 
 function checkSprite(name: string, s: PixelSprite, w: number, h: number) {
@@ -53,6 +55,11 @@ describe('pixel art du jardin vivant', () => {
 import { ACCESSORY_SPRITES, CHECK_BADGE, CORGI_FRAMES, CORGI_PALETTE, HOLE, ZZZ } from '../src/art/living-sprites';
 
 describe('pixel art du compagnon', () => {
+  it('les meubles font 16×16 ou 16×24 (hauts), le lit occupé comme le lit', () => {
+    for (const [k, s] of Object.entries(FURNITURE_SPRITES)) checkSprite(`meuble ${k}`, s, 16, FURNITURE[k as FurnitureId].tall ? 24 : 16);
+    checkSprite('lit occupé', BED_SLEEP, 16, 24);
+  });
+
   it('le corgi fait 16×16 et ses accessoires tiennent dans le dessin', () => {
     for (const [k, rows] of Object.entries(CORGI_FRAMES)) checkGrid(`corgi ${k}`, rows, 16, 16, new Set(['.', ...Object.keys(CORGI_PALETTE)]));
     for (const [k, a] of Object.entries(ACCESSORY_SPRITES)) {

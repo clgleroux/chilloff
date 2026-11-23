@@ -300,6 +300,66 @@ export function cabin(season: Season, night: boolean): HTMLCanvasElement {
   return p.canvas;
 }
 
+export const WORKSHOP_W = 48;
+export const WORKSHOP_H = 38;
+
+/** La remise de l'atelier : planches, toit de tôle en appentis, porte ouverte sur l'établi. */
+export function workshop(season: Season): HTMLCanvasElement {
+  const p = new Painter(WORKSHOP_W, WORKSHOP_H);
+  const wall = { base: '#a07a52', dark: '#7a5a3e', light: '#c09468', line: '#5a3e2a' };
+  const tin = { base: '#8aa0a8', dark: '#6a7e88', light: '#b4c8d0' };
+
+  // Murs en planches verticales.
+  p.rect(4, 14, 40, 24, wall.base);
+  for (let x = 4; x < 44; x++) {
+    const k = (x - 4) % 5;
+    if (k === 4) p.rect(x, 14, 1, 24, wall.line);
+    else if (k === 0) p.rect(x, 14, 1, 24, wall.light);
+  }
+  p.rect(4, 14, 2, 24, wall.dark);
+  p.rect(42, 14, 2, 24, wall.dark);
+
+  // Toit de tôle ondulée, plus haut à gauche.
+  for (let x = 1; x < 47; x++) {
+    const top = 2 + Math.floor(((x - 1) * 7) / 46);
+    for (let y = top; y < 15; y++) {
+      const rib = (x - 1) % 4;
+      p.px(x, y, rib === 0 ? tin.light : rib === 3 ? tin.dark : tin.base);
+    }
+    p.px(x, 15, '#4a5a62');
+  }
+
+  // Porte ouverte : l'établi et une scie accrochée au fond.
+  p.rect(16, 20, 16, 18, '#4a3426');
+  p.rect(15, 19, 18, 1, wall.line);
+  p.rect(15, 19, 1, 19, wall.line);
+  p.rect(32, 19, 1, 19, wall.line);
+  p.rect(18, 22, 7, 2, '#c4c8cc'); p.rect(24, 22, 2, 3, '#8a5a3a'); // scie
+  p.rect(27, 21, 1, 5, '#8a5a3a'); p.rect(26, 21, 3, 2, '#9aa0a8'); // marteau
+  p.rect(17, 29, 14, 2, '#d8a870'); // plateau de l'établi
+  p.rect(18, 31, 2, 7, '#7a5232'); p.rect(28, 31, 2, 7, '#7a5232');
+  p.rect(21, 27, 3, 2, '#b07848'); // une planchette posée
+
+  // Petite fenêtre à droite, et des rondins le long du mur de gauche.
+  p.rect(35, 21, 6, 6, '#5a3420');
+  p.rect(36, 22, 4, 4, '#9fd0e8');
+  p.px(36, 22, '#d4f0ff');
+  for (const [x, y] of [[6, 33], [10, 33], [8, 30]] as const) {
+    p.rect(x, y, 4, 4, '#b07848');
+    p.px(x + 1, y + 1, '#e0b884'); p.px(x + 2, y + 2, '#e0b884');
+  }
+
+  if (season === 'winter') {
+    for (let x = 1; x < 47; x++) {
+      const top = 2 + Math.floor(((x - 1) * 7) / 46);
+      p.px(x, top, '#ffffff'); p.px(x, top + 1, '#ffffff');
+      if (x % 3 !== 0) p.px(x, top + 2, '#e6eef6');
+    }
+  }
+  p.outline();
+  return p.canvas;
+}
+
 export const TREE_W = 32;
 export const TREE_H = 44;
 

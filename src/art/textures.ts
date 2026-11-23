@@ -13,6 +13,7 @@ import {
 import { UI_ICONS } from './sprites';
 import { ANIMAL_SPRITES, PRODUCE_SPRITES, SIGN_SPRITES, building, paddockFence } from './farm-art';
 import { BUILDING_IDS, type BuildingId } from '../game/farm';
+import { BED_SLEEP, FURNITURE_SPRITES, room } from './house-art';
 import { PADDOCKS } from '../game/world';
 
 function sprite(s: PixelSprite): HTMLCanvasElement {
@@ -76,6 +77,9 @@ function buildAll(): CanvasMap {
     m.set(`fence_${s}`, draw.fenceTile(s));
     m.set(`cabin_${s}_day`, draw.cabin(s, false));
     m.set(`cabin_${s}_night`, draw.cabin(s, true));
+    m.set(`workshop_${s}`, draw.workshop(s));
+    m.set(`room_${s}_day`, room(s, false));
+    m.set(`room_${s}_night`, room(s, true));
     for (const id of BUILDING_IDS) {
       for (const ruined of [true, false]) {
         const state = ruined ? 'ruin' : 'ok';
@@ -102,6 +106,8 @@ function buildAll(): CanvasMap {
   }
   for (const [id, sp] of Object.entries(MATERIAL_SPRITES)) m.set(`mat_${id}`, sprite(sp));
   for (const [id, sp] of Object.entries(DECO_SPRITES)) m.set(`deco_${id}`, sprite(sp));
+  for (const [id, sp] of Object.entries(FURNITURE_SPRITES)) m.set(`furn_${id}`, sprite(sp));
+  m.set('furn_bed_sleep', sprite(BED_SLEEP));
   for (const [id, sp] of Object.entries(VISITOR_SPRITES)) m.set(`vis_${id}`, sprite(sp));
   for (const [id, sp] of Object.entries(MAILBOX_SPRITES)) m.set(`mailbox_${id}`, sprite(sp));
   for (const [id, sp] of Object.entries(EXTRA_UI_ICONS)) m.set(`ui_${id}`, sprite(sp));
@@ -154,6 +160,7 @@ export const cropIconUrl = (id: CropId) => textureUrl(`icon_${id}`);
 export const uiIconUrl = (name: keyof typeof UI_ICONS | keyof typeof EXTRA_UI_ICONS) => textureUrl(`ui_${name}`);
 export const materialIconUrl = (id: string) => textureUrl(`mat_${id}`);
 export const decoIconUrl = (id: string) => textureUrl(`deco_${id}`);
+export const furnitureIconUrl = (id: string) => textureUrl(`furn_${id}`);
 export const visitorIconUrl = (id: string) => textureUrl(`vis_${id}`);
 export const corgiUrl = (accessory: AccessoryId | null, frame: CorgiFrame = 'walkA') => textureUrl(`corgi_${accessory ?? 'none'}_${frame}`);
 export const produceIconUrl = (id: string) => textureUrl(`produce_${id}`);

@@ -1,4 +1,4 @@
-// Trajets du compagnon et du jardinier : lignes droites qui contournent la cabane et l'arbre (et le potager
+// Trajets du compagnon et du jardinier : lignes droites qui contournent la cabane, la remise et l'arbre (et le potager
 // pour le corgi ; le jardinier, lui, marche entre les rangs). Le jardinier va aussi à la ferme, au bout
 // du chemin : il contourne les enclos en passant par l'allée. Sans Phaser (testé).
 
@@ -13,9 +13,12 @@ export const DOORMAT: Point = { x: 40, y: 74 };
 /** Zones que le corgi contourne (en position de ses pattes). */
 const CABIN: Rect = { x0: 12, x1: 68, y0: 22, y1: 67 };
 const TREE: Rect = { x0: 140, x1: 180, y0: 14, y1: 67 }; // pour ne jamais se cacher derrière son feuillage
+/** La remise de l'atelier, entre la boîte aux lettres et l'arbre. */
+const WORKSHOP: Rect = { x0: 84, x1: 126, y0: 22, y1: 67 };
 export const OBSTACLES: Rect[] = [
   { x0: 44, x1: 148, y0: 82, y1: 184 }, // potager
   CABIN,
+  WORKSHOP,
   TREE,
 ];
 /** Les enclos de la ferme (clôture et bâtiment) : le jardinier s'en occupe depuis l'allée. */
@@ -23,8 +26,8 @@ export const PADDOCK_OBSTACLES: Rect[] = BUILDING_IDS.map((id) => {
   const f = PADDOCKS[id].fence;
   return { x0: f.x0 - 2, x1: f.x1 + 4, y0: f.y0 - 2, y1: f.y1 + 3 };
 });
-/** Le jardinier passe dans le potager : il ne contourne que la cabane, l'arbre et les enclos. */
-export const GARDENER_OBSTACLES: Rect[] = [CABIN, TREE, ...PADDOCK_OBSTACLES];
+/** Le jardinier passe dans le potager : il ne contourne que la cabane, la remise, l'arbre et les enclos. */
+export const GARDENER_OBSTACLES: Rect[] = [CABIN, WORKSHOP, TREE, ...PADDOCK_OBSTACLES];
 /** Là où le jardinier peut se tenir (pieds), dans l'herbe entre la cabane et la clôture, jusqu'au bout de la ferme. */
 export const WALK_AREA: Rect = { x0: 6, x1: FARM_X + 186, y0: 24, y1: 190 };
 /** Le seuil de la porte de la cabane, où le jardinier entre et sort. */

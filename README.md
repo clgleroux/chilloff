@@ -22,8 +22,25 @@ Jouable sur mobile et sur ordinateur, installable comme une appli (PWA).
 - **Visiteurs** : moineau, écureuil, rouge-gorge, chouette (la nuit)… On les salue d'un toucher : ils s'inscrivent au journal et laissent parfois un cadeau. S'ils repartent, d'autres viendront.
 - **Courrier** : Mamie Rose, Léon le facteur, Capucine et Basile le boulanger écrivent de petites demandes. Aucun délai : on répond quand on veut, ou on décline poliment.
 - **L'arbre** se secoue : des feuilles tombent, et parfois une brindille.
-- **Atelier** : 11 décos à fabriquer (nichoir, banc, lanterne, mare, bonhomme de neige…) et à poser librement dans l'herbe.
+- **Atelier** : une remise en planches, entre la boîte aux lettres et l'arbre. Le jardinier y va à pied et l'atelier s'ouvre
+  (plus de bouton en bas de l'écran). On y fabrique 11 décos pour le jardin (nichoir, banc, lanterne, mare, bonhomme de neige…),
+  à poser librement dans l'herbe, et 11 meubles pour la maison. Une étincelle brille à sa fenêtre quand on a de quoi fabriquer quelque chose.
+- **Démonter** : les décos reçues des voisins (ou fabriquées en trop) qu'on ne veut pas poser se démontent à l'atelier,
+  depuis l'onglet « Stock » : on récupère **tous les matériaux de cueillette** de la recette, mais ni les pièces, ni les légumes,
+  ni les produits de la ferme. Une déco déjà posée se range d'abord (« Arranger le jardin »), puis se démonte.
 - **La déco attire des visiteurs** : la mésange se pose sur le nichoir, le chat fait la sieste près du banc, les lucioles brillent autour des lanternes les nuits d'été… 11 visiteurs à découvrir au fil des saisons. Le jeu ne le dit nulle part : le journal ne montre que des silhouettes, et une petite note n'apparaît qu'après la rencontre.
+
+### La maison
+
+Toucher la cabane : le jardinier rentre, et la caméra montre l'intérieur, une pièce de 8 × 6 cases avec deux fenêtres
+qui donnent sur le jardin (selon la saison et l'heure). En bas de l'écran, les meubles fabriqués à l'atelier : on en prend un,
+on touche le plancher (ou le mur pour un tableau ou l'horloge) pour le poser ; toucher un meuble posé le reprend en main.
+La porte (ou le bouton « Sortir ») ramène au jardin, et le jardinier ressort sur le seuil.
+
+- **11 meubles** : chaise, table, plante verte, tableau, tapis, lampe, bibliothèque, fauteuil, horloge, lit, poêle.
+  Ils coûtent des brindilles, des cailloux et des pièces ; le tapis demande de la laine, le fauteuil de la laine angora (la ferme).
+- **Petits secrets**, que le jeu ne dit pas : la nuit, le jardinier dort dans le lit s'il y en a un (et un « z » s'envole),
+  le corgi vient dormir sur le tapis, et le poêle et la lampe éclairent la pièce le soir.
 
 ### Le compagnon
 
@@ -115,19 +132,23 @@ src/
     letters.ts   courrier des voisins
     companion.ts le corgi : amitié, accessoires, fouilles
     farm.ts      la ferme : bâtiments, rénovation, animaux, production en temps réel, repas
+    house.ts     la maison : meubles et leurs recettes, plan de la pièce (plancher, mur, fenêtres, porte)
     world.ts     plan du jardin et de la ferme : où l'on peut poser, cueillir, recevoir des visiteurs ; les enclos
     state.ts     état de la partie, actions du joueur, vie du jardin, sauvegarde
   art/         pixel art généré par code (aucune image à télécharger)
     sprites.ts   plantes et icônes dessinées en texte (1 caractère = 1 pixel)
     living-sprites.ts  trouvailles, décos, visiteurs, boîte aux lettres
     farm-art.ts  bâtiments (en ruine / rénovés, par saison), clôtures, animaux, produits, panneaux
-    draw.ts      décors procéduraux : herbe, terre, cabane, arbres… par saison
+    house-art.ts meubles, et la pièce de la maison (par saison, de jour et de nuit)
+    draw.ts      décors procéduraux : herbe, terre, cabane, remise de l'atelier, arbres… par saison
     textures.ts  enregistrement des textures pour Phaser et l'interface
   scenes/      GardenScene : le jardin, les interactions, les petits effets
                Gardener.ts : le jardinier (file de tâches, outils, repos, nuit dans la cabane)
                Corgi.ts / route.ts : promenade du compagnon et trajets du jardinier (contourner la cabane, l'arbre, les enclos…)
                Farm.ts : la ferme (enclos, animaux qui se promènent, produits) ; la caméra jardin / ferme est dans GardenScene
+               House.ts : l'intérieur de la maison (meubles, jardinier et corgi endormis), dessiné hors de vue sous le jardin
   ui/          interface HTML : barres, boutique, atelier, courrier, journal, options, mode déco
+               indoor.ts : dans la maison (meuble en main, sortir), partagé entre la scène et l'interface
   i18n/        traductions FR / EN
 scripts/
   generate_icons.py  icônes de l'appli (Pillow)
@@ -145,6 +166,8 @@ depuis la console (`chilloff.state`).
 - **Changer le rythme** : durées et prix dans `crops.ts` ; arrosage, défrichage, fréquence des trouvailles, des visiteurs et du courrier dans `config.ts`.
 - **Régler la ferme** : prix de rénovation, prix et nombre d'animaux, temps de production dans `src/game/farm.ts` ;
   prix de vente des produits dans `PRODUCE` ; plan des enclos dans `src/game/world.ts` (`PADDOCKS`).
+- **Ajouter un meuble** : une entrée dans `src/game/house.ts` (`FURNITURE` : recette, plancher ou mur, haut, lumineux),
+  son dessin dans `art/house-art.ts`, ses textes `furniture.<id>` et `furniture.hint.<id>` dans `i18n/`.
 - **Ajouter une déco ou un visiteur** : une entrée dans `decor.ts` ou `visitors.ts`, son dessin dans `art/living-sprites.ts`, ses textes dans `i18n/`.
 - **Remplacer le pixel art** par un pack d'images : charger les images dans `GardenScene.preload()` avec les mêmes clés de texture que `textures.ts`.
 
@@ -157,5 +180,7 @@ depuis la console (`chilloff.state`).
 - [x] **Un compagnon** (corgi) avec 5 accessoires débloqués par l'amitié
 - [x] **Un jardinier** qui se déplace pour faire chaque action
 - [x] **La ferme** : rénover poulailler, clapier, bergerie et étable ; poules, lapins, moutons et vaches
+- [x] **L'atelier et la maison** : une remise où l'on fabrique et démonte, une maison à meubler
+- [ ] **Outils** fabriqués à l'atelier pour le jardinier (à cadrer)
 - [ ] **Jalons du journal** qui débloquent de la déco
 - [ ] Objectif du jour, musique douce, déco de saison

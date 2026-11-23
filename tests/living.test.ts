@@ -101,7 +101,7 @@ describe('jardin vivant', () => {
     const { game } = newGame();
     expect(game.craft('birdhouse')).toEqual({ ok: false, reason: 'missingItems' });
     game.state.materials.twig = 4;
-    expect(game.craft('birdhouse')).toEqual({ ok: true, deco: 'birdhouse' });
+    expect(game.craft('birdhouse')).toEqual({ ok: true, item: 'birdhouse' });
     expect(game.state.coins).toBe(20 - (DECOS.birdhouse.recipe.coins ?? 0));
     expect(game.takeDeco('birdhouse')).toBe(true);
     expect(game.placeDeco('birdhouse', 4, 3)).toEqual({ ok: false, reason: 'blocked' }); // boîte aux lettres

@@ -47,6 +47,25 @@ const tapTile = (col, row) => tapWorld((col + 0.5) * 16, (row + 0.5) * 16);
 
 const step = (name) => console.log('✓', name);
 
+/** La remise de l'atelier, entre la boîte aux lettres et l'arbre : le jardinier y va, et l'atelier s'ouvre. */
+const openWorkshop = async () => {
+  await tapWorld(104, 50);
+  await page.locator('.panel-workshop').waitFor();
+  await page.waitForTimeout(250);
+};
+
+/** Toucher une case de la pièce (repère de la pièce), quand la caméra montre l'intérieur de la maison. */
+async function tapRoom(col, row) {
+  const box = await page.locator('#game canvas').boundingBox();
+  const p = await page.evaluate(([c, r]) => {
+    const cam = window.chilloffScene.cameras.main;
+    const wx = c * 16 + 8, wy = 40 * 16 + r * 16 + 8;
+    return { x: (wx - cam.worldView.x) * cam.zoom, y: (wy - cam.worldView.y) * cam.zoom };
+  }, [col, row]);
+  await page.touchscreen.tap(box.x + p.x, box.y + p.y);
+  await page.waitForTimeout(250);
+}
+
 /** Le corgi se promène librement : pour le test, on le fait patienter sur le chemin, loin de tout. */
 const parkCorgi = () => page.evaluate(() => {
   const c = window.chilloffScene.corgi;
@@ -169,9 +188,9 @@ assert.equal(s.decor.inventory.birdhouse, 1);
 assert.equal(s.letter, null);
 step('courrier : bulle cliquable, lettre donnée');
 
-// 10. Atelier : poser le nichoir dans l'herbe
-await page.locator('.workshop-btn').click();
-await page.waitForTimeout(250);
+// 10. Atelier : plus de bouton en bas, on va à la remise ; poser le nichoir dans l'herbe
+assert.equal(await page.locator('.workshop-btn').count(), 0);
+await openWorkshop();
 await page.locator('.panel-workshop .btn.primary').first().click();
 await page.waitForTimeout(250);
 assert.equal(await page.locator('#edit-banner').isVisible(), true);
@@ -192,8 +211,7 @@ await page.evaluate(() => {
   g.state.forage = g.state.forage.filter((f) => !busy(f.col, f.row));
   g.state.visitors = g.state.visitors.filter((v) => !busy(v.col, v.row));
 });
-await page.locator('.workshop-btn').click();
-await page.waitForTimeout(250);
+await openWorkshop();
 assert.match(await page.locator('.panel-workshop').innerText(), /Prêtes à poser/i);
 await page.locator('.panel-workshop .chip-btn').first().click();
 await page.waitForTimeout(250);
@@ -209,6 +227,60 @@ s = await save();
 assert.equal(s.decor.placed.filter((d) => d.id === 'stepstone').length, 3);
 assert.equal(s.decor.inventory.stepstone, undefined);
 step('pose en série');
+
+// 11 bis. Démonter une déco reçue en trop : on récupère ses matériaux (pas les pièces).
+await page.evaluate(() => {
+  const g = window.chilloff;
+  g.returnDeco('bench');
+  g.state.materials = {};
+  g.selectSeed(g.state.selectedSeed);
+});
+let coins = (await save()).coins;
+await openWorkshop();
+await page.locator('.panel-workshop .card', { hasText: 'Banc' }).getByRole('button', { name: 'Démonter' }).click();
+assert.match(await page.locator('.panel-dialog').innerText(), /6 × Brindille, 2 × Caillou/);
+await page.locator('.panel-dialog .btn.primary').click();
+await page.waitForTimeout(250);
+s = await save();
+assert.equal(s.decor.inventory.bench, undefined);
+assert.deepEqual(s.materials, { twig: 6, pebble: 2 });
+assert.equal(s.coins, coins);
+await page.locator('.close-btn').click();
+await page.waitForTimeout(250);
+step('démonter une déco');
+
+// 11 ter. Fabriquer une chaise, entrer dans la maison et la poser ; puis ressortir.
+await page.evaluate(() => { const g = window.chilloff; g.state.coins += 20; g.selectSeed(g.state.selectedSeed); });
+coins = (await save()).coins;
+await openWorkshop();
+await page.getByRole('tab', { name: 'Maison' }).click();
+await page.locator('.panel-workshop .card', { hasText: 'Chaise' }).getByRole('button', { name: 'Fabriquer' }).click();
+await page.waitForTimeout(250);
+s = await save();
+assert.equal(s.house.inventory.chair, 1);
+assert.equal(s.coins, coins - 5);
+await page.locator('.close-btn').click();
+await page.waitForTimeout(250);
+await tapWorld(40, 44, { wait: false });
+await page.waitForFunction(() => window.chilloffScene.view === 'house', null, { timeout: 15_000 });
+await page.waitForTimeout(600);
+assert.match(await page.locator('#bottombar').innerText(), /Chaise/);
+await page.locator('#bottombar .seed', { hasText: 'Chaise' }).click();
+assert.match(await page.locator('#edit-banner').innerText(), /plancher/);
+await tapRoom(2, 4);
+s = await save();
+assert.deepEqual(s.house.placed.map((d) => [d.id, d.col, d.row]), [['chair', 2, 4]]);
+assert.equal(s.house.inventory.chair, undefined);
+// La reprendre en main, puis la reposer plus loin.
+await tapRoom(2, 4);
+await tapRoom(5, 3);
+s = await save();
+assert.deepEqual(s.house.placed.map((d) => [d.id, d.col, d.row]), [['chair', 5, 3]]);
+await page.locator('.leave-btn').click();
+await page.waitForFunction(() => window.chilloffScene.view === 'garden', null, { timeout: 5_000 });
+await page.waitForTimeout(800);
+await parkCorgi();
+step('maison : fabriquer un meuble, entrer, le poser, ressortir');
 
 // 12. Le compagnon : un câlin, et on lui donne un nom
 await parkCorgi();
@@ -290,6 +362,7 @@ assert.equal((await page.locator('.coin-count').innerText()).trim(), String(coin
 assert.equal((await save()).decor.placed.length, 4);
 assert.equal((await save()).companion.name, 'Biscotte');
 assert.equal((await save()).farm.coop.animals, 2);
+assert.equal((await save()).house.placed.length, 1);
 assert.equal(await page.evaluate(() => window.chilloffScene.view), 'garden');
 step('sauvegarde après rechargement');
 

@@ -58,6 +58,9 @@ export class Gardener {
   private poseTimer = 0;
   private retries = 0;
   private lastFrame = '';
+  /** On est dans la maison avec lui : il y reste, même le jour. */
+  private stayHome = false;
+  private onHome: (() => void) | null = null;
 
   constructor(private scene: Phaser.Scene, private garden: Game, private baseDepth: number) {
     const start = garden.night ? FRONT_DOOR : HOME_SPOT;
@@ -112,8 +115,8 @@ export class Gardener {
       case 'walk': this.walk(delta); break;
       case 'idle': this.idle(delta); break;
       case 'inside':
-        // Au matin, il ressort de lui-même.
-        if (!this.garden.night) { this.idleClock += delta; if (this.idleClock > 2500) this.comeOut(); }
+        // Au matin, il ressort de lui-même (sauf si on est dans la maison avec lui).
+        if (!this.garden.night && !this.stayHome) { this.idleClock += delta; if (this.idleClock > 2500) this.comeOut(); }
         break;
       default: break;
     }
@@ -127,7 +130,7 @@ export class Gardener {
     this.hideTool();
     const job = this.queue.shift() ?? null;
     this.current = job;
-    if (!job) { this.rest(); return; }
+    if (!job) { if (this.stayHome) this.goInside(); else this.rest(); return; }
     const target = job.target();
     if (!target) { this.drop(job); return; }
     job.start?.();
@@ -203,6 +206,29 @@ export class Gardener {
 
   // --- La cabane -------------------------------------------------------------
 
+  /** Il laisse tout et rentre dans la cabane ; `inside` quand il a passé la porte. */
+  enterHouse(inside: () => void): void {
+    this.clear(true);
+    this.stayHome = true;
+    this.onHome = inside;
+    if (this.mode === 'inside') this.reachedHome();
+    else if (this.mode === 'idle' || this.mode === 'walk') this.goInside();
+    // En plein geste ou sur le seuil : la fin du geste (next) ou du pas de porte s'en charge.
+  }
+
+  /** On ressort de la maison avec lui. */
+  leaveHouse(): void {
+    this.stayHome = false;
+    this.onHome = null;
+    if (this.mode === 'inside') this.comeOut();
+  }
+
+  private reachedHome(): void {
+    const done = this.onHome;
+    this.onHome = null;
+    done?.();
+  }
+
   /** Il sort de la cabane : il apparaît sur le seuil et descend sur le chemin. */
   private comeOut(): void {
     this.mode = 'door';
@@ -210,7 +236,7 @@ export class Gardener {
     this.render('front');
     this.scene.tweens.add({
       targets: this.img, y: FRONT_DOOR.y, alpha: 1, duration: 450, ease: 'Sine.easeOut',
-      onComplete: () => { this.mode = 'idle'; this.idleClock = 0; this.next(); },
+      onComplete: () => { this.mode = 'idle'; this.idleClock = 0; this.next(); }, // next() le ramène dedans s'il doit y rester
     });
   }
 
@@ -225,7 +251,8 @@ export class Gardener {
           this.img.setVisible(false);
           this.mode = 'inside';
           this.idleClock = 0;
-          if (this.queue.length) this.comeOut(); // on l'a appelé pendant qu'il rentrait
+          if (this.stayHome) this.reachedHome();
+          else if (this.queue.length) this.comeOut(); // on l'a appelé pendant qu'il rentrait
         },
       });
     };
