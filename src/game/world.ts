@@ -2,7 +2,8 @@
 //
 //   col 0 1 2 3 4 5 6 7 8 9 10 11
 //   row 1   [cabane]          [arbre]
-//   row 3   [cabane] ✉        [arbre] ⇢   (panneau vers la ferme)
+//   row 2   [cabane]  [remise][arbre]       (la remise de l'atelier, cols 5 à 7)
+//   row 3   [cabane] ✉[remise][arbre] ⇢   (panneau vers la ferme)
 //   row 4       = = = chemin = = = = = ⇢ la ferme, à droite (cols 12 à 23)
 //   row 5..10        [potager 6×6]
 //   row 11 ❀                       ❀      (buissons dans les coins)
@@ -24,6 +25,14 @@ export const TREE_SPOTS = {
 /** Cases où tombe une brindille quand on secoue l'arbre. */
 export const TREE_DROP_TILES: ReadonlyArray<[number, number]> = [[8, 3], [11, 2], [8, 2], [11, 1], [8, 1]];
 
+/** La remise de l'atelier, entre la boîte aux lettres et l'arbre : sa porte donne sur le chemin. */
+export const WORKSHOP_COLS: [number, number] = [5, 7];
+export const WORKSHOP_ROWS: [number, number] = [2, 3];
+/** Coin gauche et pied du dessin de la remise. */
+export const WORKSHOP_POS = { x: WORKSHOP_COLS[0] * TILE, footY: (WORKSHOP_ROWS[1] + 1) * TILE } as const;
+/** Le seuil de la remise : le jardinier s'y présente depuis le chemin. */
+export const WORKSHOP_DOOR = { x: 6 * TILE + 8, y: (WORKSHOP_ROWS[1] + 1) * TILE - 2 } as const;
+
 export const BUSH_TILES: ReadonlyArray<[number, number]> = [[0, 11], [11, 11]];
 export const PATH_ROW = 4;
 /** Le chemin part de la cabane, longe le potager et file jusqu'au bord droit du jardin (vers la ferme). */
@@ -43,6 +52,7 @@ export function isStaticBlocked(col: number, row: number): boolean {
   // La boîte aux lettres, et la case au-dessus où flotte la bulle du courrier (gardée libre pour bien la toucher).
   if (col === MAILBOX_TILE.col && (row === MAILBOX_TILE.row || row === MAILBOX_TILE.row - 1)) return true;
   if ((col === 9 || col === 10) && row >= 1 && row <= 3) return true; // arbre
+  if (col >= WORKSHOP_COLS[0] && col <= WORKSHOP_COLS[1] && row >= WORKSHOP_ROWS[0] && row <= WORKSHOP_ROWS[1]) return true; // remise
   if (row === PATH_ROW && col >= PATH_COLS[0] && col <= PATH_COLS[1]) return true;
   if (BUSH_TILES.some(([c, r]) => c === col && r === row)) return true;
   if (col === GARDEN_SIGN_TILE.col && row === GARDEN_SIGN_TILE.row) return true;

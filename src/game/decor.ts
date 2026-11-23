@@ -1,6 +1,7 @@
 // Décorations : fabriquées à l'atelier, posées librement dans l'herbe, certaines attirent des visiteurs.
 
 import type { CropId } from './crops';
+import type { ProduceId } from './farm';
 import type { MaterialId } from './materials';
 import type { Season } from './seasons';
 
@@ -11,6 +12,8 @@ export type DecoId =
 export interface Recipe {
   materials?: Partial<Record<MaterialId, number>>;
   crops?: Partial<Record<CropId, number>>;
+  /** Produits de la ferme (laine pour un tapis…). */
+  produce?: Partial<Record<ProduceId, number>>;
   coins?: number;
   /** Ne se fabrique qu'à cette saison (le bonhomme de neige…). */
   season?: Season;

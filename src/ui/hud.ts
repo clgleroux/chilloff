@@ -1,26 +1,31 @@
 // Interface HTML par-dessus le jeu : barre du haut, graines, boutique, journal, options, bulles.
 
 import {
-  animalIconUrl, buildingUrl, corgiUrl, cropIconUrl, decoIconUrl, materialIconUrl, produceIconUrl, textureUrl, uiIconUrl, visitorIconUrl,
+  animalIconUrl, buildingUrl, corgiUrl, cropIconUrl, decoIconUrl, furnitureIconUrl, materialIconUrl, produceIconUrl, textureUrl, uiIconUrl,
+  visitorIconUrl,
 } from '../art/textures';
 import { ACCESSORY_IDS, NAME_MAX_LENGTH, accessoryHearts, type AccessoryId } from '../game/companion';
 import { CROPS, CROP_IDS, cropsForSeason, type CropId } from '../game/crops';
 import { DECOS, DECO_IDS, type DecoId, type Recipe } from '../game/decor';
 import {
-  BUILDINGS, BUILDING_IDS, PRODUCE, PRODUCE_IDS, isProduceReady, timeUntilProduce, type BuildingId,
+  BUILDINGS, BUILDING_IDS, PRODUCE, PRODUCE_IDS, isProduceReady, timeUntilProduce, type BuildingId, type ProduceId,
 } from '../game/farm';
+import { FURNITURE, FURNITURE_IDS, type FurnitureId } from '../game/house';
 import type { Want } from '../game/letters';
 import { MATERIAL_IDS, type MaterialId } from '../game/materials';
 import { SEASONS, daysUntilNextSeason, nextSeason, type Season } from '../game/seasons';
-import type { Game, Lang } from '../game/state';
+import type { CraftId, Game, Lang } from '../game/state';
 import { VISITOR_IDS } from '../game/visitors';
 import {
-  accessoryName, buildingName, cropName, decoName, formatDate, formatDuration, getLang, materialName, onLangChange, produceName,
+  accessoryName, buildingName, cropName, decoName, formatDate, formatDuration, furnitureName, getLang, materialName, onLangChange, produceName,
   seasonName, setLang, t, visitorName,
 } from '../i18n';
 import type { SceneHooks } from '../scenes/GardenScene';
 import { h, pixelImg } from './dom';
 import { edit } from './edit';
+import { indoor } from './indoor';
+
+type WorkshopTab = 'craft' | 'furniture' | 'mine';
 
 type PanelKind = 'shop' | 'journal' | 'options' | 'dialog' | 'workshop' | 'letter' | 'name' | 'building';
 
@@ -38,7 +43,7 @@ export class Hud implements SceneHooks {
   private panel: OpenPanel | null = null;
   private shopTab: 'buy' | 'sell' = 'buy';
   private journalTab: 'harvests' | 'visitors' | 'companion' | 'notebook' = 'harvests';
-  private workshopTab: 'craft' | 'mine' = 'craft';
+  private workshopTab: WorkshopTab = 'craft';
   private banner = h('div', { id: 'edit-banner', hidden: true });
 
   constructor(private game: Game) {
@@ -46,10 +51,13 @@ export class Hud implements SceneHooks {
     game.onChange(() => this.renderAll());
     onLangChange(() => this.renderAll());
     edit.on(() => { this.renderBanner(); this.renderBottom(); });
+    indoor.on(() => { this.renderBanner(); this.renderBottom(); });
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
       if (this.panel) this.closePanel();
       else if (edit.active) this.finishEdit();
+      else if (indoor.hand) indoor.drop(this.game);
+      else if (indoor.active) indoor.leave(this.game);
     });
     setInterval(() => this.renderTop(), 60_000);
     this.renderAll();
@@ -93,6 +101,7 @@ export class Hud implements SceneHooks {
   // --- Barre du bas : graines + boutique ---------------------------------------
 
   private renderBottom(): void {
+    if (indoor.active) { this.renderHouseBar(); return; }
     const s = this.game.state;
     const owned = CROP_IDS.filter((id) => (s.seeds[id] ?? 0) > 0);
     const basketCount = [...Object.values(s.basket), ...Object.values(s.produce)].reduce((a: number, b) => a + (b ?? 0), 0);
@@ -120,20 +129,46 @@ export class Hud implements SceneHooks {
       );
     }
 
-    const craftable = DECO_IDS.some((id) => this.game.canCraft(id));
-    const decosOwned = Object.values(s.decor.inventory).reduce((a, b) => a + (b ?? 0), 0);
+    // L'atelier ne s'ouvre plus d'ici : il faut aller à la remise, à côté de la cabane.
     this.bottom.classList.toggle('editing', edit.active);
+    this.bottom.classList.remove('indoor');
     this.bottom.replaceChildren(
       seedBar,
-      h('button', { class: 'shop-btn workshop-btn', onclick: () => this.openWorkshop(decosOwned > 0 ? 'mine' : 'craft') },
-        pixelImg(uiIconUrl('hammer'), 32),
-        h('span', {}, t('hud.workshop')),
-        decosOwned > 0 ? h('span', { class: 'badge' }, decosOwned) : craftable ? h('span', { class: 'badge dot' }, '!') : null,
-      ),
       h('button', { class: 'shop-btn', onclick: () => this.openShop(basketCount > 0 ? 'sell' : 'buy') },
         pixelImg(uiIconUrl('basket'), 32),
         h('span', {}, t('hud.shop')),
         basketCount > 0 ? h('span', { class: 'badge' }, basketCount) : null,
+      ),
+    );
+  }
+
+  /** Dans la maison : les meubles fabriqués, prêts à poser, et la porte pour sortir. */
+  private renderHouseBar(): void {
+    const inv = this.game.state.house.inventory;
+    const owned = FURNITURE_IDS.filter((id) => (inv[id] ?? 0) > 0 || indoor.hand === id);
+    const bar = h('div', { class: 'seedbar', role: 'listbox', 'aria-label': t('house.furniture') });
+    if (!owned.length) bar.append(h('div', { class: 'seed empty' }, h('span', { class: 'seed-name' }, t('house.empty'))));
+    for (const id of owned) {
+      const selected = indoor.hand === id;
+      const n = (inv[id] ?? 0) + (selected ? 1 : 0);
+      bar.append(
+        h('button', {
+          class: `seed${selected ? ' selected' : ''}`, role: 'option', 'aria-selected': String(selected), title: furnitureName(id),
+          onclick: () => (selected ? indoor.drop(this.game) : indoor.take(this.game, id)),
+        },
+          this.furnitureImg(id, 32),
+          h('span', { class: 'seed-count' }, `×${n}`),
+          h('span', { class: 'seed-name' }, furnitureName(id)),
+        ),
+      );
+    }
+    this.bottom.classList.remove('editing');
+    this.bottom.classList.add('indoor');
+    this.bottom.replaceChildren(
+      bar,
+      h('button', { class: 'shop-btn leave-btn', onclick: () => indoor.leave(this.game) },
+        pixelImg(textureUrl('gardener_front'), 21, '', 32),
+        h('span', {}, t('house.leave')),
       ),
     );
   }
@@ -482,6 +517,9 @@ export class Hud implements SceneHooks {
     for (const [id, n] of Object.entries(recipe.crops ?? {}) as Array<[CropId, number]>) {
       chips.push(this.need(cropIconUrl(id), cropName(id), s.basket[id] ?? 0, n));
     }
+    for (const [id, n] of Object.entries(recipe.produce ?? {}) as Array<[ProduceId, number]>) {
+      chips.push(this.need(produceIconUrl(id), produceName(id), s.produce[id] ?? 0, n));
+    }
     if (recipe.coins) chips.push(this.need(uiIconUrl('coin'), t('hud.coins'), s.coins, recipe.coins));
     return h('div', { class: 'chips' }, ...chips);
   }
@@ -542,15 +580,22 @@ export class Hud implements SceneHooks {
   }
 
   // --- Atelier --------------------------------------------------------------
+  // Il s'ouvre quand le jardinier arrive à la remise (voir GardenScene). On y fabrique les décos du jardin
+  // et les meubles de la maison, et on démonte ce qui ne sert plus pour en récupérer les matériaux.
 
-  openWorkshop(tab: 'craft' | 'mine'): void {
-    this.workshopTab = tab;
+  openWorkshop(tab?: WorkshopTab): void {
+    const s = this.game.state;
+    const stock = [...Object.values(s.decor.inventory), ...Object.values(s.house.inventory)].reduce((a: number, b) => a + (b ?? 0), 0);
+    this.workshopTab = tab ?? (stock > 0 ? 'mine' : 'craft');
     this.openPanel('workshop', () => [
       this.header(t('workshop.title'), uiIconUrl('hammer')),
       this.bag(),
       ...this.readyToPlace(),
-      this.tabs(this.workshopTab, [['craft', t('workshop.tab.craft')], ['mine', t('workshop.tab.mine')]], (v) => (this.workshopTab = v)),
-      ...(this.workshopTab === 'craft' ? this.workshopCraft() : this.workshopMine()),
+      this.tabs(this.workshopTab, [
+        ['craft', t('workshop.tab.craft')], ['furniture', t('workshop.tab.furniture')], ['mine', t('workshop.tab.mine')],
+      ], (v) => (this.workshopTab = v)),
+      ...(this.workshopTab === 'craft' ? this.workshopCraft(DECO_IDS)
+        : this.workshopTab === 'furniture' ? this.workshopCraft(FURNITURE_IDS) : this.workshopMine()),
     ]);
   }
 
@@ -583,63 +628,105 @@ export class Hud implements SceneHooks {
     return pixelImg(decoIconUrl(id), size, '', DECOS[id].tall ? size * 1.5 : size);
   }
 
-  private workshopCraft(): HTMLElement[] {
+  private furnitureImg(id: FurnitureId, size = 48): HTMLImageElement {
+    return pixelImg(furnitureIconUrl(id), size, '', FURNITURE[id].tall ? size * 1.5 : size);
+  }
+
+  private craftImg(id: CraftId, size = 48): HTMLImageElement {
+    return id in FURNITURE ? this.furnitureImg(id as FurnitureId, size) : this.decoImg(id as DecoId, size);
+  }
+
+  private craftName(id: CraftId): string {
+    return id in FURNITURE ? furnitureName(id as FurnitureId) : decoName(id as DecoId);
+  }
+
+  /** Les décos du jardin, ou les meubles de la maison, à fabriquer. */
+  private workshopCraft(ids: readonly CraftId[]): HTMLElement[] {
     const g = this.game;
     const season = g.season;
-    // Les décos de la saison et celles qu'on peut fabriquer remontent en haut de la liste.
-    const order = [...DECO_IDS].sort((a, b) => Number(g.canCraft(b)) - Number(g.canCraft(a)));
+    // Ce qu'on peut fabriquer remonte en haut de la liste.
+    const order = [...ids].sort((a, b) => Number(g.canCraft(b)) - Number(g.canCraft(a)));
     return [h('div', { class: 'card-list' }, ...order.map((id) => {
-      const def = DECOS[id];
-      const seasonLocked = def.recipe.season && def.recipe.season !== season;
-      const stock = g.state.decor.inventory[id] ?? 0;
-      const placed = g.state.decor.placed.filter((d) => d.id === id).length;
+      const furniture = id in FURNITURE;
+      const recipe = g.recipeOf(id);
+      const seasonLocked = recipe.season && recipe.season !== season;
+      const stock = g.stockOf(id);
+      const placed = furniture
+        ? g.state.house.placed.filter((d) => d.id === id).length
+        : g.state.decor.placed.filter((d) => d.id === id).length;
       return h('div', { class: `card craft-card${g.canCraft(id) ? ' ready' : ''}` },
-        this.decoImg(id),
+        this.craftImg(id),
         h('div', { class: 'card-main' },
-          h('strong', {}, decoName(id)),
+          h('strong', {}, this.craftName(id)),
           // Laisser découvrir : on décrit l'objet, jamais le visiteur qu'il attire.
-          h('small', {}, t(`deco.hint.${id}`)),
-          seasonLocked ? h('small', { class: 'muted' }, t('workshop.onlySeason', { season: seasonName(def.recipe.season!) })) : null,
+          h('small', {}, t(furniture ? `furniture.hint.${id}` : `deco.hint.${id}`)),
+          seasonLocked ? h('small', { class: 'muted' }, t('workshop.onlySeason', { season: seasonName(recipe.season!) })) : null,
           stock || placed ? h('small', { class: 'stock' }, [
             stock ? t('workshop.toPlace', { n: stock }) : '',
-            placed ? t('workshop.inGarden', { n: placed }) : '',
+            placed ? t(furniture ? 'workshop.inHouse' : 'workshop.inGarden', { n: placed }) : '',
           ].filter(Boolean).join(' · ')) : null,
-          this.recipeChips(def.recipe),
+          this.recipeChips(recipe),
         ),
         h('div', { class: 'card-actions' },
           h('button', {
             class: 'btn primary', disabled: !g.canCraft(id),
-            onclick: () => { if (g.craft(id).ok) this.toast(t('workshop.crafted', { name: decoName(id) })); },
+            onclick: () => {
+              if (g.craft(id).ok) this.toast(t(furniture ? 'workshop.craftedFurniture' : 'workshop.crafted', { name: this.craftName(id) }));
+            },
           }, t('workshop.craft')),
         ),
       );
     }))];
   }
 
+  /** Ce qu'on a fabriqué (ou reçu des voisins) sans l'avoir posé : le poser, ou le démonter. */
   private workshopMine(): HTMLElement[] {
     const s = this.game.state;
-    const owned = DECO_IDS.filter((id) => (s.decor.inventory[id] ?? 0) > 0);
+    const decos = DECO_IDS.filter((id) => (s.decor.inventory[id] ?? 0) > 0);
+    const furniture = FURNITURE_IDS.filter((id) => (s.house.inventory[id] ?? 0) > 0);
+    const card = (id: CraftId, extra: HTMLElement | null, actions: HTMLElement[]) =>
+      h('div', { class: 'card' },
+        this.craftImg(id),
+        h('div', { class: 'card-main' },
+          h('strong', {}, this.craftName(id)),
+          h('small', {}, t('workshop.owned', { n: this.game.stockOf(id) })),
+          extra,
+        ),
+        h('div', { class: 'card-actions' }, ...actions),
+      );
+    const dismantleBtn = (id: CraftId) => h('button', { class: 'btn ghost', onclick: () => this.confirmDismantle(id) }, t('workshop.dismantle'));
     const placedCount = (id: DecoId) => s.decor.placed.filter((d) => d.id === id).length;
-    const out: Array<HTMLElement | null> = [
-      owned.length
-        ? h('div', { class: 'card-list' }, ...owned.map((id) =>
-          h('div', { class: 'card' },
-            this.decoImg(id),
-            h('div', { class: 'card-main' },
-              h('strong', {}, decoName(id)),
-              h('small', {}, t('workshop.owned', { n: s.decor.inventory[id] ?? 0 })),
-              placedCount(id) ? h('small', { class: 'muted' }, t('workshop.placed', { n: placedCount(id) })) : null,
-            ),
-            h('div', { class: 'card-actions' },
-              h('button', { class: 'btn primary', onclick: () => this.startPlacing(id) }, t('workshop.place')),
-            ),
-          )))
-        : h('p', { class: 'empty-note' }, t('workshop.noDecos')),
-      s.decor.placed.length
-        ? h('button', { class: 'btn wide', onclick: () => { this.closePanel(); edit.start(null); } }, t('workshop.arrange'))
-        : null,
-    ];
+    const out: Array<HTMLElement | null> = [];
+    if (!decos.length && !furniture.length) out.push(h('p', { class: 'empty-note' }, t('workshop.noDecos')));
+    if (decos.length) {
+      out.push(h('p', { class: 'section-title' }, t('workshop.forGarden')));
+      out.push(h('div', { class: 'card-list' }, ...decos.map((id) => card(id,
+        placedCount(id) ? h('small', { class: 'muted' }, t('workshop.placed', { n: placedCount(id) })) : null,
+        [h('button', { class: 'btn primary', onclick: () => this.startPlacing(id) }, t('workshop.place')), dismantleBtn(id)]))));
+    }
+    if (furniture.length) {
+      out.push(h('p', { class: 'section-title' }, t('workshop.forHouse')));
+      out.push(h('div', { class: 'card-list' }, ...furniture.map((id) => card(id,
+        h('small', { class: 'muted' }, t('workshop.placeInHouse')), [dismantleBtn(id)]))));
+    }
+    if (s.decor.placed.length) {
+      out.push(h('button', { class: 'btn wide', onclick: () => { this.closePanel(); edit.start(null); } }, t('workshop.arrange')));
+    }
     return out.filter((x): x is HTMLElement => x !== null);
+  }
+
+  /** Démonter : on dit ce qu'on récupère, et on demande confirmation. */
+  private confirmDismantle(id: CraftId): void {
+    const salvage = Object.entries(this.game.salvageOf(id)) as Array<[MaterialId, number]>;
+    const body = salvage.length
+      ? t('workshop.dismantleBody', { list: salvage.map(([m, n]) => `${n} × ${materialName(m)}`).join(', ') })
+      : t('workshop.dismantleNothing');
+    this.dialog(t('workshop.dismantleTitle', { name: this.craftName(id) }), body, t('workshop.dismantle'), () => {
+      const res = this.game.dismantle(id);
+      this.openWorkshop('mine');
+      if (res.ok) this.toast(t('workshop.dismantled', { name: this.craftName(id) }));
+      else this.toast(t('workshop.notInStock'));
+    });
   }
 
   // --- Mode déco ---------------------------------------------------------------
@@ -657,6 +744,7 @@ export class Hud implements SceneHooks {
   }
 
   private renderBanner(): void {
+    if (indoor.active) { this.renderHouseBanner(); return; }
     this.banner.hidden = !edit.active;
     if (!edit.active) return;
     this.banner.replaceChildren(
@@ -665,6 +753,19 @@ export class Hud implements SceneHooks {
         ? t('edit.placeCount', { name: decoName(edit.hand), n: 1 + (this.game.state.decor.inventory[edit.hand] ?? 0) })
         : t('edit.move')),
       h('button', { class: 'btn primary', onclick: () => this.finishEdit() }, t('edit.done')),
+    );
+  }
+
+  /** Dans la maison, avec un meuble en main : où le poser, et un bouton pour le ranger. */
+  private renderHouseBanner(): void {
+    const hand = indoor.hand;
+    this.banner.hidden = !hand;
+    if (!hand) return;
+    const n = 1 + (this.game.state.house.inventory[hand] ?? 0);
+    this.banner.replaceChildren(
+      this.furnitureImg(hand, 24),
+      h('span', {}, t(FURNITURE[hand].spot === 'wall' ? 'house.hang' : 'house.place', { name: furnitureName(hand), n })),
+      h('button', { class: 'btn primary', onclick: () => indoor.drop(this.game) }, t('house.putAway')),
     );
   }
 

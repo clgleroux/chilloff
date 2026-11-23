@@ -34,6 +34,7 @@ describe('promenade du corgi', () => {
 });
 
 import { approach, GARDENER_OBSTACLES, REACH, WALK_AREA } from '../src/scenes/route';
+import { WORKSHOP_DOOR } from '../src/game/world';
 
 describe('le jardinier', () => {
   const free = (p: Point) =>
@@ -51,6 +52,13 @@ describe('le jardinier', () => {
     expect(free(at)).toBe(true);
     expect(at.x).toBeGreaterThan(72);
     expect(face).toBe(-1);
+  });
+
+  it('va à la remise de l’atelier par le chemin, devant sa porte', () => {
+    const { at } = approach(WORKSHOP_DOOR, { x: 20, y: 120 });
+    expect(free(at)).toBe(true);
+    expect(at.y).toBeGreaterThan(WORKSHOP_DOOR.y);
+    expect(Math.abs(at.x - WORKSHOP_DOOR.x)).toBeLessThanOrEqual(REACH);
   });
 
   it('secoue l’arbre et salue les oiseaux perchés depuis le bas', () => {

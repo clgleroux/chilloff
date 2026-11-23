@@ -430,8 +430,7 @@ img.silhouette { filter: brightness(0); opacity: 0.18; }
 
 /* --- Jardin vivant : atelier, courrier, mode déco ------------------------------- */
 
-.workshop-btn { background: #c4823a; border-color: #8a5424; text-shadow: 0 1px 0 #8a5424; }
-.badge.dot { background: var(--gold); color: var(--ink); }
+.leave-btn { background: #c4823a; border-color: #8a5424; text-shadow: 0 1px 0 #8a5424; }
 #bottombar.editing .seedbar, #bottombar.editing .shop-btn { opacity: 0.45; pointer-events: none; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
